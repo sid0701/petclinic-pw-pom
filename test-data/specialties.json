@@ -1,0 +1,42 @@
+[
+    {
+        "id": 5919,
+        "name": "radiology"
+    },
+    {
+        "id": 5920,
+        "name": "surgery"
+    },
+    {
+        "id": 5921,
+        "name": "dentistry"
+    },
+    {
+        "id": 5922,
+        "name": "pshyciatry"
+    },
+    {
+        "id": 5923,
+        "name": "cardiology"
+    },
+    {
+        "id": 5924,
+        "name": "opthamology"
+    },
+    {
+        "id": 5925,
+        "name": "paediatrics"
+    },
+    {
+        "id": 5926,
+        "name": "hepatology"
+    },
+    {
+        "id": 5927,
+        "name": "orthopedics"
+    },
+    {
+        "id": 5928,
+        "name": "dermatology"
+    }
+]

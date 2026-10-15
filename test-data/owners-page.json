@@ -1,0 +1,160 @@
+[
+    {
+        "firstName": "Rafa",
+        "lastName": "Nadal",
+        "address": "007 East Avenue",
+        "city": "Barcelona",
+        "telephone": "68765431",
+        "id": 2000,
+        "pets": [
+            {
+                "name": "Shiro",
+                "birthDate": "2012-11-07",
+                "type": {
+                    "name": "cat",
+                    "id": 3543
+                },
+                "id": 5361,
+                "ownerId": 2000,
+                "visits": [
+                    {
+                        "date": "2024-01-14",
+                        "description": "dermatologists visit",
+                        "id": 7111,
+                        "petId": null
+                    },
+                    {
+                        "date": "2024-02-14",
+                        "description": "dermatologists visit",
+                        "id": 7112,
+                        "petId": null
+                    },
+                    {
+                        "date": "2024-03-14",
+                        "description": "dermatologists visit",
+                        "id": 7113,
+                        "petId": null
+                    },
+                    {
+                        "date": "2024-04-14",
+                        "description": "dermatologists visit",
+                        "id": 7114,
+                        "petId": null
+                    },
+                    {
+                        "date": "2024-05-14",
+                        "description": "dermatologists visit",
+                        "id": 7115,
+                        "petId": null
+                    },
+                    {
+                        "date": "2024-06-14",
+                        "description": "dermatologists visit",
+                        "id": 7116,
+                        "petId": null
+                    },
+                    {
+                        "date": "2024-07-14",
+                        "description": "dermatologists visit",
+                        "id": 7117,
+                        "petId": null
+                    },
+                    {
+                        "date": "2024-08-14",
+                        "description": "dermatologists visit",
+                        "id": 7118,
+                        "petId": null
+                    },
+                    {
+                        "date": "2024-09-14",
+                        "description": "dermatologists visit",
+                        "id": 7119,
+                        "petId": null
+                    },
+                    {
+                        "date": "2024-10-14",
+                        "description": "dermatologists visit",
+                        "id": 7120,
+                        "petId": null
+                    }
+                ]
+            },
+            {
+                "name": "Miro",
+                "birthDate": "2018-09-07",
+                "type": {
+                    "name": "dog",
+                    "id": 3544
+                },
+                "id": 5362,
+                "ownerId": 2000,
+                "visits": []
+            }
+        ]
+    },
+    {
+        "firstName": "Carloz",
+        "lastName": "Alcaraz",
+        "address": "638 West Avenue",
+        "city": "Madrid",
+        "telephone": "6085551454",
+        "id": 3000,
+        "pets": [
+            {
+                "name": "Tommy",
+                "birthDate": "2016-12-07",
+                "type": {
+                    "name": "snake",
+                    "id": 3547
+                },
+                "id": 5364,
+                "ownerId": 3000,
+                "visits": []
+            },
+            {
+                "name": "Husky",
+                "birthDate": "2001-01-09",
+                "type": {
+                    "name": "dog",
+                    "id": 3548
+                },
+                "id": 5365,
+                "ownerId": 3000,
+                "visits": []
+            },
+            {
+                "name": "Menu",
+                "birthDate": "2026-01-05",
+                "type": {
+                    "name": "hamster",
+                    "id": 3540
+                },
+                "id": 5369,
+                "ownerId": 3000,
+                "visits": []
+            },
+            {
+                "name": "Jugga",
+                "birthDate": "2001-01-27",
+                "type": {
+                    "name": "dog",
+                    "id": 3505
+                },
+                "id": 5305,
+                "ownerId": 3000,
+                "visits": []
+            },
+            {
+                "name": "Linda",
+                "birthDate": "2021-11-07",
+                "type": {
+                    "name": "lizard",
+                    "id": 3500
+                },
+                "id": 5300,
+                "ownerId": 3000,
+                "visits": []
+            }
+        ]
+    }
+]
