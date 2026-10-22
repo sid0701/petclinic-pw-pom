@@ -5,7 +5,10 @@ import { petclinicApiUrl } from '../helpers/api-urls'
 export type TestOptions = {
     pom: PageManager
     restorePetTypes: void
+    restoreVetSpecialties: void
 }
+
+type Vet = { id: number, firstName: string, lastName: string, specialties: { id: number, name: string }[] }
 
 export const test = base.extend<TestOptions>({
 
@@ -27,6 +30,26 @@ export const test = base.extend<TestOptions>({
             const currentPetType = currentPetTypes.find(petType => petType.id === originalPetType.id)
             if (currentPetType && currentPetType.name !== originalPetType.name) {
                 const restoreResponse = await request.put(`${petclinicApiUrl}/pettypes/${originalPetType.id}`, { data: originalPetType })
+                expect(restoreResponse.ok(), `PUT ${restoreResponse.url()} returned ${restoreResponse.status()}`).toBeTruthy()
+            }
+        }
+    },
+
+    //Snapshot every vet's specialties before the test and restore any changed ones afterwards, even if the test fails
+    restoreVetSpecialties: async ({ request }, use) => {
+        const originalVetsResponse = await request.get(`${petclinicApiUrl}/vets`)
+        expect(originalVetsResponse.ok(), `GET ${originalVetsResponse.url()} returned ${originalVetsResponse.status()}`).toBeTruthy()
+        const originalVets: Vet[] = await originalVetsResponse.json()
+
+        await use()
+
+        const currentVetsResponse = await request.get(`${petclinicApiUrl}/vets`)
+        const currentVets: Vet[] = await currentVetsResponse.json()
+        const specialtyIds = (vet: Vet) => vet.specialties.map(specialty => specialty.id).sort().join(',')
+        for (const originalVet of originalVets) {
+            const currentVet = currentVets.find(vet => vet.id === originalVet.id)
+            if (currentVet && specialtyIds(currentVet) !== specialtyIds(originalVet)) {
+                const restoreResponse = await request.put(`${petclinicApiUrl}/vets/${originalVet.id}`, { data: originalVet })
                 expect(restoreResponse.ok(), `PUT ${restoreResponse.url()} returned ${restoreResponse.status()}`).toBeTruthy()
             }
         }
