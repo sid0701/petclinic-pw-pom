@@ -6,9 +6,11 @@ export type TestOptions = {
     pom: PageManager
     restorePetTypes: void
     restoreVetSpecialties: void
+    restorePetTypeOfPets: void
 }
 
 type Vet = { id: number, firstName: string, lastName: string, specialties: { id: number, name: string }[] }
+type Pet = { id: number, name: string, birthDate: string, type: { id: number, name: string }, ownerId: number }
 
 export const test = base.extend<TestOptions>({
 
@@ -50,6 +52,25 @@ export const test = base.extend<TestOptions>({
             const currentVet = currentVets.find(vet => vet.id === originalVet.id)
             if (currentVet && specialtyIds(currentVet) !== specialtyIds(originalVet)) {
                 const restoreResponse = await request.put(`${petclinicApiUrl}/vets/${originalVet.id}`, { data: originalVet })
+                expect(restoreResponse.ok(), `PUT ${restoreResponse.url()} returned ${restoreResponse.status()}`).toBeTruthy()
+            }
+        }
+    },
+
+    //Snapshot every pet's type before the test and restore any changed ones afterwards, even if the test fails
+    restorePetTypeOfPets: async ({ request }, use) => {
+        const originalPetsResponse = await request.get(`${petclinicApiUrl}/pets`)
+        expect(originalPetsResponse.ok(), `GET ${originalPetsResponse.url()} returned ${originalPetsResponse.status()}`).toBeTruthy()
+        const originalPets: Pet[] = await originalPetsResponse.json()
+
+        await use()
+
+        const currentPetsResponse = await request.get(`${petclinicApiUrl}/pets`)
+        const currentPets: Pet[] = await currentPetsResponse.json()
+        for (const originalPet of originalPets) {
+            const currentPet = currentPets.find(pet => pet.id === originalPet.id)
+            if (currentPet && currentPet.type.id !== originalPet.type.id) {
+                const restoreResponse = await request.put(`${petclinicApiUrl}/pets/${originalPet.id}`, { data: { ...currentPet, type: originalPet.type } })
                 expect(restoreResponse.ok(), `PUT ${restoreResponse.url()} returned ${restoreResponse.status()}`).toBeTruthy()
             }
         }

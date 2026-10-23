@@ -21,4 +21,11 @@ export class HeaderComponent {
         await expect(this.page).toHaveURL('/vets')
         await expect(this.page.getByRole('heading', { level: 2 })).toHaveText('Veterinarians')
     }
+
+    async openOwners() {
+        await this.page.getByRole('button', { name: 'Owners' }).click()
+        await this.page.getByRole('link', { name: 'Search' }).click()
+        await expect(this.page).toHaveURL('/owners')
+        await expect(this.page.getByRole('heading', { level: 2 })).toHaveText('Owners')
+    }
 }
