@@ -18,7 +18,7 @@ export const test = base.extend<TestOptions>({
         await use(new PageManager(page))
     },
 
-    //Snapshot pet type names before the test and restore any renamed ones afterwards, even if the test fails
+    //Snapshot pet types before the test, then restore renamed ones and delete added ones afterwards, even if the test fails
     restorePetTypes: async ({ request }, use) => {
         const originalPetTypesResponse = await request.get(`${petclinicApiUrl}/pettypes`)
         expect(originalPetTypesResponse.ok(), `GET ${originalPetTypesResponse.url()} returned ${originalPetTypesResponse.status()}`).toBeTruthy()
@@ -33,6 +33,12 @@ export const test = base.extend<TestOptions>({
             if (currentPetType && currentPetType.name !== originalPetType.name) {
                 const restoreResponse = await request.put(`${petclinicApiUrl}/pettypes/${originalPetType.id}`, { data: originalPetType })
                 expect(restoreResponse.ok(), `PUT ${restoreResponse.url()} returned ${restoreResponse.status()}`).toBeTruthy()
+            }
+        }
+        for (const currentPetType of currentPetTypes) {
+            if (!originalPetTypes.some(petType => petType.id === currentPetType.id)) {
+                const deleteResponse = await request.delete(`${petclinicApiUrl}/pettypes/${currentPetType.id}`)
+                expect(deleteResponse.ok(), `DELETE ${deleteResponse.url()} returned ${deleteResponse.status()}`).toBeTruthy()
             }
         }
     },
