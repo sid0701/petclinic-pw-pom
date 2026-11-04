@@ -7,6 +7,8 @@ import { EditVeterinarianPage } from '../pages/edit-veterinarians-page';
 import { OwnersPage } from '../pages/owners-page';
 import { OwnerInformationPage } from '../pages/owner-information-page';
 import { EditPetPage } from '../pages/edit-pet-page';
+import { SpecialtiesPage } from '../pages/specialties-page';
+import { EditSpecialtyPage } from '../pages/edit-specialty-page';
 
 export class PageManager {
 
@@ -18,6 +20,8 @@ export class PageManager {
     readonly ownersPage: OwnersPage
     readonly ownerInformationPage: OwnerInformationPage
     readonly editPetPage: EditPetPage
+    readonly specialtiesPage: SpecialtiesPage
+    readonly editSpecialtyPage: EditSpecialtyPage
 
     constructor(page: Page) {
         this.headerComponent = new HeaderComponent(page)
@@ -28,5 +32,7 @@ export class PageManager {
         this.ownersPage = new OwnersPage(page)
         this.ownerInformationPage = new OwnerInformationPage(page)
         this.editPetPage = new EditPetPage(page)
+        this.specialtiesPage = new SpecialtiesPage(page)
+        this.editSpecialtyPage = new EditSpecialtyPage(page)
     }
 }

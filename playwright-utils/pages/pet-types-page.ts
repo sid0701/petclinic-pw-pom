@@ -6,12 +6,13 @@ export class PetTypesPage {
 
     // Values are bound by Angular, not rendered as text, so they are read from the live inputs
     private readPetTypeValues() {
-        return this.page.locator('tbody tr').getByRole('textbox').evaluateAll(
+        return this.page.getByRole('row').getByRole('textbox').evaluateAll(
             inputs => inputs.map(input => (input as HTMLInputElement).value))
     }
 
     private async findPetTypeRow(petType: string) {
-        const petTypeRows = this.page.locator('tbody tr')
+        // Only the body rows hold a textbox, so this skips the header row
+        const petTypeRows = this.page.getByRole('row').filter({ has: this.page.getByRole('textbox') })
         await expect(petTypeRows.getByRole('textbox').first()).not.toHaveValue('')
 
         const liveValues = await this.readPetTypeValues()
@@ -22,35 +23,27 @@ export class PetTypesPage {
         return petTypeRows.nth(rowIndex)
     }
 
-    async openEditPetType(petType: string): Promise<string> {
+    async openEditPetType(petType: string) {
         const petTypeRow = await this.findPetTypeRow(petType)
-
-        const petTypeRowId = await petTypeRow.getByRole('textbox').getAttribute('id')
-        if (!petTypeRowId) {
-            throw new Error(`Pet type "${petType}" row has no id attribute`)
-        }
-
         const clickEditResponse = this.page.waitForResponse(response =>
             /\/api\/pettypes\/\d+$/.test(response.url()) && response.request().method() === 'GET')
         await petTypeRow.getByRole('button', { name: 'Edit' }).click()
         const editResponse = await clickEditResponse
         expect(editResponse.ok(), `GET ${editResponse.url()} returned ${editResponse.status()}`).toBeTruthy()
         await expect(this.page).toHaveURL(/\/pettypes\/\d+\/edit$/)
-        return petTypeRowId
-    }
-
-    // The row id is the table row index ("0", "1", ...), not the pet type's database id
-    async expectPetTypeAtRow(rowId: string, petType: string) {
-        await expect(this.page.locator(`[id="${rowId}"]`)).toHaveValue(petType)
-    }
-
-    async expectPetTypeAtLastRow(petType: string) {
-        await expect(this.page.locator('tbody tr').last().getByRole('textbox')).toHaveValue(petType)
     }
 
     // Input values can't be matched by a locator, so poll the live values to retry like a locator assertion
+    async expectPetTypeListed(petType: string) {
+        await expect.poll(() => this.readPetTypeValues(), { message: `"${petType}" should be listed` }).toContain(petType)
+    }
+
+    async expectPetTypeAtLastRow(petType: string) {
+        await expect(this.page.getByRole('row').filter({ has: this.page.getByRole('textbox') }).last().getByRole('textbox')).toHaveValue(petType)
+    }
+
     async expectPetTypeNotListed(petType: string) {
-        await expect.poll(() => this.readPetTypeValues()).not.toContain(petType)
+        await expect.poll(() => this.readPetTypeValues(), { message: `"${petType}" should not be listed` }).not.toContain(petType)
     }
 
     async addNewPetType(petType: string) {

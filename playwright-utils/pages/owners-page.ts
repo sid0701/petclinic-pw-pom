@@ -1,22 +1,33 @@
-import { type Page, expect } from '@playwright/test'
+import { type Locator, type Page, expect } from '@playwright/test'
 
 export class OwnersPage {
 
     constructor(private page: Page) { }
 
     async openOwnerInformation(ownerName: string) {
+        await this.openOwnerInformationFromLink(this.page.getByRole('cell').getByRole('link', { name: ownerName }))
+    }
+
+    // Shared by both open methods: clicks the owner's name link, then confirms the owner details loaded
+    private async openOwnerInformationFromLink(ownerLink: Locator) {
         const ownerClickResponse = this.page.waitForResponse(response =>
             /\/api\/owners\/\d+$/.test(response.url()) && response.request().method() === 'GET')
-        await this.page.getByRole('cell').getByRole('link', { name: ownerName }).click()
+        await ownerLink.click()
         const clickResponse = await ownerClickResponse
         expect(clickResponse.ok(), `GET ${clickResponse.url()} returned ${clickResponse.status()}`).toBeTruthy()
         await expect(this.page).toHaveURL(/\/owners\/\d+$/)
     }
 
     async expectOwnerCountInCity(cityName: string, expectedCount: number) {
-        // :nth-child(3) is evaluated per row, so this matches the City cell of every row
-        await expect(this.page.locator('tbody tr td:nth-child(3)').getByText(cityName, { exact: true }))
-            .toHaveCount(expectedCount)
+        // Only City cells hold exactly the city name, so this counts one cell per owner in that city
+        await expect(this.page.getByRole('cell', { name: cityName, exact: true })).toHaveCount(expectedCount)
+    }
+
+    async expectPetNamesInCity(cityName: string, petNames: string[]) {
+        // Rows of owners in the city, then the nested pet rows (only the Pets cell holds a nested table).
+        // toHaveText with an array checks the count, the table order and an exact match for every name
+        await expect(this.page.getByRole('row').filter({ has: this.page.getByRole('cell', { name: cityName, exact: true }) })
+            .getByRole('cell').getByRole('row')).toHaveText(petNames)
     }
 
     async searchByLastName(lastName: string, expectedStatus = 200) {
@@ -45,16 +56,18 @@ export class OwnersPage {
         }
     }
 
-    async openOwnerInformationUsingTelephone(telephone: string): Promise<string[]> {
-        const ownerRow = this.page.locator('tbody tr').filter({ has: this.page.getByText(telephone) })
+    // Returns the owner name and pet names shown in the list, so the test can check them on the Owner Information page
+    async openOwnerInformationByTelephone(telephone: string): Promise<{ ownerName: string, petNames: string[] }> {
+        // The exact Telephone cell pins the row; the nested pet rows hold no telephone cell, so only the owner row matches
+        const ownerRow = this.page.getByRole('row').filter({ has: this.page.getByRole('cell', { name: telephone, exact: true }) })
         await expect(ownerRow).toBeVisible()
-        const petCells = ownerRow.getByRole('cell').getByRole('row')
-        //If the ownerhas pets then return the list of pets otherwise return a blank array
-        if (petCells)
-            return await petCells.allTextContents()
-
-        await ownerRow.getByRole('link').click()
-        return []
+        // The pet rows render together with the owner row, so after the guard above
+        // allInnerTexts() returns every pet name (an empty array when the owner has no pets).
+        // It returns the rendered text, so the raw whitespace in "<tr> George </tr>" is already trimmed
+        const petNames = await ownerRow.getByRole('cell').getByRole('row').allInnerTexts()
+        // The Name cell holds the row's only link
+        const ownerName = await ownerRow.getByRole('link').innerText()
+        await this.openOwnerInformationFromLink(ownerRow.getByRole('link'))
+        return { ownerName, petNames }
     }
-
 }

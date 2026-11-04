@@ -33,4 +33,14 @@ export class HeaderComponent {
         await expect(this.page).toHaveURL('/owners')
         await expect(this.page.getByRole('heading', { level: 2 })).toHaveText('Owners')
     }
+
+    async openSpecialties() {
+        const specialtiesResponse = this.page.waitForResponse(response =>
+            /\/api\/specialties$/.test(response.url()) && response.request().method() === 'GET')
+        await this.page.getByRole('link', { name: 'Specialties' }).click()
+        const response = await specialtiesResponse
+        expect(response.ok(), `GET ${response.url()} returned ${response.status()}`).toBeTruthy()
+        await expect(this.page).toHaveURL('/specialties')
+        await expect(this.page.getByRole('heading', { level: 2 })).toHaveText('Specialties')
+    }
 }

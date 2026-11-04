@@ -753,3 +753,452 @@ This makes the error path deterministic, because you don't have to wait for the 
 **Open point:** the exact error text or element the app shows on a failed search still needs to be checked in the app (source or a live run) before writing `expectErrorMessage`.
 
 ---
+
+## How does allTextContents() work, and does it throw if the pet rows don't exist?
+
+**Date:** 2026-11-04
+**Project:** petclinic-pw-pom (Playwright POM)
+
+**Q:** How does the `allTextContents()` method actually work? Does it return an error if, in this case, the pet rows don't exist?
+
+```ts
+const petNames = (await ownerRow.getByRole('cell').getByRole('row').allTextContents())
+    .map(petName => petName.trim())
+```
+
+**A:**
+
+`allTextContents()` doesn't throw when nothing matches. It returns an empty array `[]`.
+
+### What it does
+
+1. **It looks for the elements once, right away.** It doesn't wait for matches to appear.
+2. **It collects every match.** No strict-mode check, so 0, 1 or 50 matches are all fine.
+3. **It returns each element's `textContent` as a `string[]`.** That's the raw DOM text: whitespace is kept and hidden text is included. This is why the pet names came back as `" George "` and need `trim()`.
+
+### Compared with similar methods
+
+| Method | Waits? | Strict (exactly one)? | When nothing matches |
+|---|---|---|---|
+| `allTextContents()` | No | No | Returns `[]` |
+| `allInnerTexts()` | No | No | Returns `[]` (rendered text: CSS-aware, whitespace normalized) |
+| `textContent()` | Yes, up to the action timeout | Yes | Times out and throws |
+| `isVisible()` | No | Yes, throws on 2+ matches | Returns `false` |
+| `count()` | No | No | Returns `0` |
+| `expect(locator).toHaveText([...])` | Yes, retries | No | Retries, then fails the assertion |
+
+It can still throw for reasons that have nothing to do with matching. For example, the page closes or navigates while the call is running.
+
+### The real risk is a silent empty array
+
+Because it doesn't wait, calling it before the page has rendered returns `[]` with no error. The code can't tell "there are no pets" apart from "the pets haven't loaded yet". That's why the project rules say to put a waiting step before `all()`, `count()`, `allTextContents()`, `textContent()` and `inputValue()`.
+
+### In this method
+
+1. `await expect(ownerRow).toBeVisible()` waits until the owner's row exists, so the owners list has loaded.
+2. The pet names are in a small table nested inside that same row. Angular renders them together with the row, so once the row is visible its pet rows are already there.
+3. So `[]` here really means "this owner has no pets", not "not loaded yet".
+
+**Edge case:** the empty array then reaches `expectPetNames`. There, `await expect(petCells.first()).toBeVisible()` fails, because an owner with no pets has no "Edit Pet" cells. So an owner with no pets currently fails the test even though `allTextContents()` itself didn't throw. Hard-coding the expected names and using `toHaveText([...])` (which passes for `[]` when no cells exist) would fix that.
+
+---
+
+## Isn't allInnerTexts() better than allTextContents()?
+
+**Date:** 2026-11-04
+**Project:** petclinic-pw-pom (Playwright POM)
+
+**Q:** Isn't using `allInnerTexts()` better than using `allTextContents()` for reading the owner's pet names?
+
+**A:**
+
+Yes, for this case. I checked both methods on the live app with a temporary test:
+
+| Owner | `allTextContents()` | `allInnerTexts()` |
+|---|---|---|
+| Phone 6085552765 (1 pet) | `[" George "]` | `["George"]` |
+| An owner with 2 pets | `[" Jewel ", " Rosy "]` | `["Jewel", "Rosy"]` |
+
+The pet row's HTML is `<tr> George </tr>`, so the spaces are really in the page. `allInnerTexts()` returns the text the way the browser shows it, so the spaces are already removed and `.map(petName => petName.trim())` is no longer needed.
+
+### The difference
+
+| | `textContent` (`allTextContents`) | `innerText` (`allInnerTexts`) |
+|---|---|---|
+| Source | Raw text nodes in the DOM | Text as the browser renders it |
+| Whitespace | Kept exactly | Collapsed and trimmed like on screen |
+| Text hidden with CSS (`display: none`) | Included | Left out |
+| Line breaks between block elements | No | Yes (`\n`; tabs between table cells) |
+| Cost | Cheap (no layout) | Needs layout (negligible here) |
+| Waits / strict | No / No | No / No (same behaviour otherwise) |
+
+### Why `innerText` suits UI tests better
+
+- It matches what the user sees, which is what a UI test is checking. A hidden element's text won't sneak into the result.
+- No manual cleanup of whitespace.
+
+### When `textContent` is the better choice
+
+- You need the exact raw text, or text that is deliberately hidden (e.g. screen-reader-only text).
+- The element contains several block elements or cells. `innerText` joins them with `\n` or tabs, which you may then have to split. Each pet row here holds only the name, so this doesn't matter.
+
+### Recommendation
+
+```ts
+const petNames = await ownerRow.getByRole('cell').getByRole('row').allInnerTexts()
+```
+
+Everything else about the call is the same: it doesn't wait, it returns `[]` when no rows match, so it still needs the `await expect(ownerRow).toBeVisible()` guard before it.
+
+---
+
+## How does toHaveText() work when the locator matches no elements, or several?
+
+**Date:** 2026-11-04
+**Project:** petclinic-pw-pom (Playwright POM)
+
+**Q:** How does the `toHaveText` method actually work? What if the locator matches nothing, or matches several elements? How does it work in `expectPetNames`?
+
+```ts
+await expect(this.page.getByRole('cell').filter({ has: this.page.getByRole('button', { name: 'Edit Pet' }) })
+    .locator('dt:text-is("Name") + dd')).toHaveText(petNames)
+```
+
+**A:**
+
+### The core idea: it retries
+
+`toHaveText` is a web-first assertion. Until the expect timeout runs out (Playwright's default is 5 seconds; this project doesn't override it, which is why failures say `Timeout: 5000ms`), it repeats:
+
+1. Find the elements the locator matches **right now** (it searches again on every attempt).
+2. Read their text (`textContent` by default, or `innerText` with `{ useInnerText: true }`).
+3. Compare the text with the expected value. On a match it passes at once; otherwise it waits briefly and tries again.
+
+If it still doesn't match when time runs out, the test fails and the error shows the expected value, the last text received and a call log.
+
+### It behaves differently for a single value and for an array
+
+| Expected value | 0 elements match | 1 element matches | 2+ elements match |
+|---|---|---|---|
+| String or regex: `toHaveText('George')` | Keeps retrying, then fails ("element(s) not found") | Compares that element's text | **Strict mode violation**: fails at once, because one value can't be compared against several elements |
+| Array: `toHaveText(['Jewel', 'Rosy'])` | Passes only if the array is empty (`[]`); otherwise retries, then fails | Passes if the array has exactly 1 matching value | Passes if the count equals the array length **and** each element matches its value, **in order** |
+
+With an array, the rules are:
+1. The number of elements must equal the number of values.
+2. Element 1 is compared with value 1, element 2 with value 2, and so on. Order matters.
+3. Every element must match. One wrong name fails the whole check.
+
+### How the text is compared
+
+| Expected | Rule | Example |
+|---|---|---|
+| String | **Full** match after whitespace normalization: spaces at the start and end are trimmed and runs of whitespace become one space, on both sides | `" George "` passes `'George'`; `"Georgette"` fails `'George'` |
+| Regex | Tested against the text; it only needs to match somewhere unless you anchor it with `^...$` | `/Geo/` passes `"George"` |
+| Case | Case-sensitive by default; `{ ignoreCase: true }` turns that off | `'george'` fails against `"George"` |
+
+`toContainText` is the same, except a string only has to appear somewhere in the text.
+
+The whitespace normalization is why this assertion would pass even on the raw `" George "` text. The list-side names still need clean values because they are used as data, which is what `allInnerTexts()` gives.
+
+### In `expectPetNames`
+
+The locator intentionally matches **every** pet's Name value (the `dd` after the "Name" `dt` in each pet cell), and `petNames` is an array, so the array rules apply:
+
+| Situation | Result |
+|---|---|
+| Owner has 1 pet: `['George']`, page shows George | Pass |
+| Owner has 2 pets: `['Jewel', 'Rosy']`, page shows Jewel, Rosy | Pass (the two-pet probe confirmed this) |
+| Page shows only Jewel | Retries, then fails: count 1 ≠ 2 |
+| Page shows Rosy, Jewel | Fails: wrong order |
+| Page shows "Jewels" | Fails: not a full match |
+| Page not rendered yet | Retries until the pets appear |
+| Owner has no pets: `[]`, page shows none | Passes at once |
+
+### One caveat: the empty array
+
+`toHaveText([])` passes immediately when there are 0 elements. It has nothing to wait for, so it would also pass if the page simply hadn't rendered the pets yet. That risk is small in this test:
+
+- `openOwnerInformation` awaits the `GET /api/owners/<id>` response and the URL, and
+- `expectOwnerTelephone` runs first and retries until the owner details are on screen. The pets render together with those details.
+
+The empty case is also only reached when the Owners list itself showed no pets for that owner, so the two pages still agree.
+
+---
+
+## What is the exact difference between textContent() and innerText()?
+
+**Date:** 2026-11-04
+**Project:** petclinic-pw-pom (Playwright POM)
+
+**Q:** What is the exact difference between the `textContent()` method and the `innerText()` method?
+
+**A:**
+
+**One-line answer:** `textContent` returns the raw text stored in the HTML. `innerText` returns the text the way the browser displays it on screen, after CSS and layout are applied.
+
+### Verified in a real browser
+
+Each row was run in Chromium with `page.setContent(...)`:
+
+| Case (HTML) | `textContent()` | `innerText()` |
+|---|---|---|
+| Extra whitespace: `<div>   George⏎        Franklin   </div>` | `"   George\n        Franklin   "` | `"George Franklin"` |
+| Hidden child: `Visible <span style="display:none">Hidden</span>` | `"Visible Hidden"` | `"Visible"` |
+| Line break: `Line1<br>Line2` | `"Line1Line2"` | `"Line1\nLine2"` |
+| CSS `text-transform: uppercase` on `george` | `"george"` | `"GEORGE"` |
+| Inline script: `Text<script>var x = 1</script>` | `"Textvar x = 1"` | `"Text"` |
+| Block elements: `<p>Para1</p><p>Para2</p>` | `"Para1Para2"` | `"Para1\n\nPara2"` |
+| Table cells: `<td>A</td><td>B</td>` | `"AB"` | `"A\tB"` |
+| The element itself is `display:none` | `"  I am hidden  "` | `"  I am hidden  "` (same: nothing is rendered, so the browser falls back to `textContent`) |
+| SVG `<text>` element | `"svg text"` | **Throws** `Node is not an HTMLElement` |
+
+### Summary of the rules
+
+| | `textContent` | `innerText` |
+|---|---|---|
+| What it reads | All text nodes in the DOM | Rendered text only |
+| Whitespace | Kept exactly as in the HTML | Collapsed and trimmed like on screen |
+| CSS-hidden children | Included | Left out |
+| `<script>` / `<style>` content | Included | Left out |
+| `<br>`, blocks, table cells | Joined with no separator | `\n`, blank lines, `\t` |
+| CSS `text-transform` | Ignored | Applied |
+| Non-HTML elements (SVG) | Works | Throws |
+| Cost | Cheap (no layout) | Forces a layout calculation (negligible in tests) |
+| Playwright return type | `string \| null` | `string` |
+
+### What is the same in Playwright
+
+Both are locator methods with the same waiting rules (also verified):
+
+- **They wait for the element to exist**, up to the action timeout. If it never appears they throw `Timeout ... exceeded`. They don't retry the *value*, so they return whatever text is there at that moment.
+- **They are strict.** If the locator matches more than one element they throw `strict mode violation`.
+
+Their "all" versions (`allTextContents()` / `allInnerTexts()`) behave differently: no waiting, no strictness, and `[]` when nothing matches.
+
+### Which one to use
+
+- **`innerText`**: when you compare against what the user sees. Clean whitespace, no hidden text. This is why the project uses `allInnerTexts()` for pet names and `innerText()` for the owner name.
+- **`textContent`**: when you need the exact raw text, text that is hidden on purpose (e.g. screen-reader-only labels), SVG text, or when CSS such as `text-transform` would change the value you compare.
+- **Assertions:** `expect(locator).toHaveText()` uses `textContent` by default (it normalizes whitespace for string values). Pass `{ useInnerText: true }` to compare the rendered text instead.
+
+---
+
+## Should expectOwnerTelephone be merged into expectOwnerInformation with an optional telephone parameter?
+
+**Date:** 2026-11-04
+**Project:** petclinic-pw-pom (Playwright POM)
+
+**Q:** In the telephone test we call two methods, `expectOwnerInformation` and `expectOwnerTelephone`. Shouldn't we merge them into just `expectOwnerInformation` and assert the telephone there too, passing it as an optional parameter?
+
+**A:**
+
+Yes, merging them makes sense, and the project's rules support it. Pass the optional values as an **options object**, though, rather than adding a third positional parameter.
+
+### Why merge
+
+- **They do the same thing.** `expectOwnerTelephone` and the City check inside `expectOwnerInformation` both find the row by its header, then check the cell's text. Only the header and the value differ. The architecture rules say: "Never write two methods that differ only in a hardcoded value — parametrize the existing method instead."
+- **The pattern already exists:** `ownerCity` is already an optional parameter.
+- **Nothing else needs it:** only the telephone test calls `expectOwnerTelephone`, so the method can be removed.
+- **The test reads better:** owner details in one step, then the pets.
+
+### Why an options object
+
+Two positional optional parameters are awkward. Checking the phone without the city would need:
+
+```ts
+await pom.ownerInformationPage.expectOwnerInformation(ownerName, undefined, telephone)   // unclear
+```
+
+With an options object, each value is named:
+
+```ts
+async expectOwnerInformation(ownerName: string, { city, telephone }: { city?: string, telephone?: string } = {}) {
+    await expect(this.page.getByRole('heading', { level: 2, name: 'Owner Information' })).toBeVisible()
+    // Only the values that are passed are checked; the Name is always checked
+    const expectedDetails = { Name: ownerName, City: city, Telephone: telephone }
+    for (const [rowHeader, expectedValue] of Object.entries(expectedDetails)) {
+        if (expectedValue === undefined) continue
+        await expect(this.page.getByRole('row').filter({ has: this.page.getByRole('rowheader', { name: rowHeader, exact: true }) })
+            .getByRole('cell')).toHaveText(expectedValue)
+    }
+}
+```
+
+The callers read clearly:
+
+```ts
+await pom.ownerInformationPage.expectOwnerInformation('Jeff Black', { city: 'Monona' })
+await pom.ownerInformationPage.expectOwnerInformation(ownerName, { telephone })
+```
+
+Other benefits:
+
+| Benefit | Detail |
+|---|---|
+| One locator instead of three | Name, City and Telephone share the same row-header locator, written once in the loop |
+| Easy to extend | Adding Address later means adding one key, not another parameter |
+| Small fix | `if (ownerCity)` treats an empty string as "not passed"; `=== undefined` doesn't |
+
+### Trade-offs
+
+| Trade-off | Detail |
+|---|---|
+| One existing call changes | `('Jeff Black', 'Monona')` becomes `('Jeff Black', { city: 'Monona' })`. `lists-and-dropdowns` passes only the name and stays the same |
+| A mistake is easier to miss | An optional check that isn't passed is skipped silently. That's already true of `ownerCity`, and the method's comment says so |
+| Failure messages | The error names the row-header locator (Name, City or Telephone) instead of a method called `expectOwnerTelephone`. You can still tell which field failed |
+
+---
+
+## Why is it { city: 'Monona' } in one call but just { telephone } in the other?
+
+**Date:** 2026-11-04
+**Project:** petclinic-pw-pom (Playwright POM)
+
+**Q:** Why are we passing `city` with the value Monona (`{ city: 'Monona' }`) but just the `telephone` variable (`{ telephone }`) in the other test?
+
+**A:**
+
+Both calls pass the same kind of object. The second one uses a JavaScript shortcut called **property shorthand**.
+
+### The shortcut
+
+When a variable has the same name as the property you're setting, you can write the name once:
+
+```ts
+const telephone = '6085552765'
+
+{ telephone }               // shorthand
+{ telephone: telephone }    // what it means: property "telephone" = value of variable telephone
+```
+
+### Why the two calls look different
+
+| Call | What's passed | Why it's written this way |
+|---|---|---|
+| `{ city: 'Monona' }` | A literal string | There's no variable, so the shortcut can't apply. You have to name the property (`city:`) and give the value |
+| `{ telephone }` | The `telephone` variable from `const telephone = '6085552765'` | The variable and the property have the same name, so the shortcut applies |
+
+Both produce the object type `expectOwnerInformation` expects, `{ city?: string, telephone?: string }`:
+
+```ts
+{ city: 'Monona' }              // → { city: 'Monona' }
+{ telephone }                   // → { telephone: '6085552765' }
+```
+
+### Other ways to write the same thing
+
+```ts
+// Long form for the telephone call (identical behaviour)
+expectOwnerInformation(ownerName, { telephone: telephone })
+
+// Shorthand for the city call, if it were stored in a variable first
+const city = 'Monona'
+expectOwnerInformation('Jeff Black', { city })
+```
+
+**Watch out:** the shortcut only works when the names match exactly. With `const phone = '6085552765'`, `{ phone }` would create a `phone` property, which the method doesn't read. You'd need `{ telephone: phone }`. TypeScript catches this one: passing an object literal with a property the type doesn't list is an error.
+
+The telephone test uses a variable because the number is used twice (to find the owner and to check it on the page). The city test uses `'Monona'` only once, so a literal is enough.
+
+---
+
+## What exactly does the expect.poll block in expectSpecialities do?
+
+**Date:** 2026-11-04
+**Project:** petclinic-pw-pom (Playwright POM)
+
+**Q:** What are these lines in `VeterinariansPage.expectSpecialities` doing exactly?
+
+```ts
+await expect.poll(async () => (await specialitiesCell.innerText())
+    .split('\n').map(specialityName => specialityName.trim()).filter(Boolean).sort(), {
+    message: `${vetName} should have specialities: ${specialities.join(', ') || 'none'}`
+}).toEqual([...specialities].sort())
+```
+
+**A:**
+
+They read the vet's Specialties cell, turn it into a sorted list of names, and keep retrying until that list equals the sorted list you passed in.
+
+### Step by step, for Linda Douglas
+
+| Step | Code | Result |
+|---|---|---|
+| 1. Read the cell's text as shown on screen | `await specialitiesCell.innerText()` | `"dentistry\nsurgery"` (each name is in its own `<div>`, so each one is on its own line) |
+| 2. Split into lines | `.split('\n')` | `["dentistry", "surgery"]` |
+| 3. Remove spaces around each name | `.map(name => name.trim())` | `["dentistry", "surgery"]` (the HTML is `<div> dentistry </div>`, so the spaces could otherwise come through) |
+| 4. Drop empty strings | `.filter(Boolean)` | An empty cell gives `""` → `[""]` → `[]`. Without this, "no specialties" would never equal `[]` |
+| 5. Sort | `.sort()` | `["dentistry", "surgery"]` |
+| 6. Compare | `.toEqual([...specialities].sort())` | You passed `'surgery', 'dentistry'`. Sorted, that's `["dentistry", "surgery"]`, so it matches |
+
+### Why `expect.poll`
+
+`innerText()` reads the cell once and doesn't wait for anything. If the table hasn't finished loading from the API yet, a single read could get stale or empty text. `expect.poll` runs the function again and again until the result matches or the default timeout runs out. That gives it the same retrying behaviour as a locator assertion like `toHaveText`. A plain `expect(await ...).toEqual(...)` would check only once.
+
+### Why sort both sides
+
+The app doesn't show specialties in a fixed order. The test expected "surgery dentistry", but the live app showed "dentistry surgery". Sorting both lists means the check only cares about **which** specialties there are, not their order.
+
+### Why `[...specialities].sort()` and not `specialities.sort()`
+
+`.sort()` changes the array it's called on. `[...specialities]` makes a copy first, so the caller's list stays as it was.
+
+### The `message` option
+
+If the check fails, Playwright shows your own text instead of a generic poll error. For example: `Linda Douglas should have specialities: surgery`. When no names are passed, `specialities.join(', ')` is `''`, so `|| 'none'` makes the message read `should have specialities: none`.
+
+### Compared with the old `toContainText`
+
+| Expected | Cell shows | Old `toContainText` | New check |
+|---|---|---|---|
+| `surgery` | dentistry, surgery | passed (wrong) | fails |
+| `surg`, `dentistry` | dentistry, surgery | `'surg'` alone would pass (wrong) | fails |
+| `surgery`, `dentistry` | dentistry, surgery | `'surgery dentistry'` fails because of the order (wrong) | passes |
+| *(nothing)* | *(empty)* | n/a | passes |
+
+---
+
+## Should we remove the row id from PetTypesPage too, since it also leaks DOM details?
+
+**Date:** 2026-11-04
+**Project:** petclinic-pw-pom (Playwright POM)
+
+**Q:** Shouldn't we also remove the row id from the pet types page? `openEditPetType` returns it and `expectPetTypeAtRow` checks it, which leaks a DOM detail into the methods the same way the specialties page did.
+
+**A:**
+
+Yes, I'd remove it. `PetTypesPage` has the same problem as `SpecialtiesPage`: `openEditPetType` returns the input's DOM `id` and `expectPetTypeAtRow(rowId, …)` checks it. Only `tests/input-fields.spec.ts` uses that pair.
+
+### Why it's the same problem
+
+- The `id` attribute is the row's position ("0", "1", …), not the pet type's database id. The test carries a DOM detail from one page object to another.
+- It depends on the list order staying the same. If the app ever sorted pet types by name, renaming `cat` to `rabbit` would move the row. The test would then fail even though the app is working.
+- A user doesn't notice which row something is in. They notice that the new name is there and the old one is gone.
+
+### What each test would check instead
+
+| Test | Now | With names |
+|---|---|---|
+| Rename and rename back | row `rowId` = `rabbit`, then = `cat` | `rabbit` listed and `cat` not listed, then `cat` listed and `rabbit` not listed |
+| Cancel the edit | row `rowId` = `dog` | `dog` listed and `moose` not listed |
+| Blank name, then cancel | row `rowId` = `lizard` | `lizard` listed |
+
+The name checks are **stronger**, not weaker:
+
+- **Rename:** "`cat` not listed" catches a bug where the app adds `rabbit` as a new row and leaves `cat` in place. The row check misses that, because it never looks at the other rows.
+- **Cancel:** "`moose` not listed" catches the cancelled name being saved somewhere else in the list. The row check would only notice if it overwrote that exact row.
+
+The one thing you lose is proof that the rename happened **in the same row**. That's a layout detail, not something users depend on, and "old name gone + new name present" already shows it was a rename and not an add.
+
+### How
+
+- `PetTypesPage`:
+  - Remove the id read from `openEditPetType` so it returns nothing.
+  - Replace `expectPetTypeAtRow` with `expectPetTypeListed`. `expectPetTypeNotListed` already exists, so this mirrors `SpecialtiesPage`.
+- `input-fields.spec.ts`: drop the `const rowId = …` lines and use the checks in the table.
+
+### Leave `expectPetTypeAtLastRow` as it is
+
+This one is also position-based, but it doesn't use DOM ids, and the position is the point. It shows that **Add** puts the new pet type at the end of the list, which is what the user sees after saving. `dialog-boxes.spec.ts` uses it for that reason.
+
+---

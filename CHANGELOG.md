@@ -6,6 +6,192 @@ Each entry lists the files changed, what changed, why, and how it was verified. 
 
 ---
 
+## 2026-11-04
+
+### Changed: new-specialty test split in two, fixed the dropdown options check, added cleanup fixtures and removed races
+
+- **Files:** `tests/web-tables.spec.ts`, `playwright-utils/pages/specialties-page.ts`, `playwright-utils/pages/edit-veterinarians-page.ts`
+- **What changed:**
+  - **Spec:** `New added speciality can be selected from sepciality dropdown` was split into two tests. Both request `restoreSpecialty, restoreVetSpecialties`, and both first check that Sharon Jenkins has no specialties.
+    - **`Newly added specialty can be assigned to a vet`:** add `oncology`, check it's listed, read all names, open the vet, check the dropdown offers exactly those names, select `oncology`, save, then check the vets list.
+    - **`Deleted specialty no longer shows on vets`:** add, assign, save, delete, check it's not listed, then check Sharon has none again.
+  - **`SpecialtiesPage`:**
+    - `readSpecialtiesValues` (unscoped `getByRole('textbox')`) was replaced by `readAllSpecialtyNames()`. It waits for the row values and then reuses the private, row-scoped `readSpecialtyValues()`.
+    - `addNewSpecialty` now checks the `New Specialty` heading after Add and checks the form is gone after Save. It also has the `#name` comment from `PetTypesPage`.
+  - **`EditVeterinarianPage`:**
+    - New private `openSpecialitiesDropdown()`, used by `expectSelectedSpecialities`, `updateSpecialities` and `expectSpecialityOptions`. It opens the dropdown with the always-visible `▼` arrow (`getByText('▼')`) instead of `.selected-specialties`.
+    - `updateSpecialities` now closes the dropdown at the end and checks the options are hidden.
+    - `expectAllSpecialties(allSpecialties)` was replaced by `expectSpecialityOptions(...specialities)`. It reads the checkbox ids, sorts them and compares with `expect.poll`.
+    - `clickSave` was renamed to `saveVeterinarian`.
+- **Why:**
+  - **Broken assertion:** on the live app, `.dropdown-content` is one wrapper, so `allInnerTexts()` returned `["radiologysurgerydentistry"]`. That could never equal the list of names. It was also a non-retrying `expect` on a CSS class. Each option is a checkbox whose `id` is the name, which `expectSelectedSpecialities` already relies on.
+  - **Cleanup on failure:** the test created `oncology` and assigned it to Sharon, and only removed it at the end. A failure partway left data on the shared server. `restoreVetSpecialties` is requested last, so it tears down first: the vet is restored before the added specialty is deleted.
+  - **One flow per test:** assigning a new specialty and deleting one are separate behaviours.
+  - **Races:**
+    - `addNewSpecialty` stopped once the POST succeeded, and the read guard only checked the first row. The names could be captured before `oncology` rendered.
+    - With the Add form open there are 4 textboxes but only 3 inside rows, which is why the read is now row-scoped.
+  - **Dropdown toggle:** `.selected-specialties` is an empty, zero-size span when a vet has no specialties, so it can't be clicked. This made the new tests and `checkboxes.spec.ts` › `Unselect all specialities` fail once the shared helper used it. A probe confirmed the `▼` arrow opens and closes the dropdown.
+  - **Closing the dropdown:** with four options the open list covers the Save button, and the first run timed out on that click.
+  - **Names:** fixed the "sepciality" typo. `saveVeterinarian` describes the user task, and `expectSpecialityOptions` says what it checks.
+- **Verified:**
+  - `npx playwright test tests/web-tables.spec.ts tests/checkboxes.spec.ts` passes 12 of 12 against the live app.
+  - A second run of the Veterinarians tests passed, and a probe (deleted afterwards) listed only `radiology, surgery, dentistry`. That confirms the fixtures cleaned up after the earlier failed run as well.
+
+### Changed: pet type tests assert names listed or not listed instead of a DOM row id
+
+- **Files:** `playwright-utils/pages/pet-types-page.ts`, `tests/input-fields.spec.ts`
+- **What changed:**
+  - `openEditPetType` no longer reads the input's `id` attribute and no longer returns it.
+  - `expectPetTypeAtRow(rowId, petType)` was replaced by `expectPetTypeListed(petType)`, which uses `expect.poll` over `readPetTypeValues()`. `expectPetTypeNotListed` now has a custom message as well.
+  - `input-fields.spec.ts`:
+    - The `const rowId = …` lines are gone.
+    - Rename: after each rename it checks the new name is listed and the old one isn't.
+    - Cancel: checks `dog` is listed and `moose` isn't.
+    - Blank name: checks `lizard` is listed.
+- **Why:**
+  - The `id` is the row's position, not the pet type's database id. It moved a DOM detail between page objects and depended on the list order. This is the same problem fixed in `SpecialtiesPage`.
+  - The name checks are stronger. "Old name not listed" catches a rename that adds a row instead of updating one. "`moose` not listed" catches a cancelled name that was saved anyway.
+  - `expectPetTypeAtLastRow` is unchanged. It uses no DOM id, and "new pet type appears at the end" is what the add flow shows the user.
+- **Verified:** `npx playwright test tests/input-fields.spec.ts tests/dialog-boxes.spec.ts` passes 5 of 5 against the live app. No `rowId` or `expectPetTypeAtRow` references remain.
+
+### Changed: specialty rename test checks the vets list after the rename and asserts names, not row ids
+
+- **Files:** `tests/web-tables.spec.ts`, `playwright-utils/pages/specialties-page.ts`, `playwright-utils/pages/pet-types-page.ts`
+- **What changed:**
+  - **Spec:**
+    - The test `Veterinarians list shows each vet's specialities` became `Renamed specialty shows on the vets who have it`.
+    - After the rename it now asserts `dermatology` is listed and `surgery` is not. It then opens Veterinarians again and asserts Rafael Ortega shows `dermatology`.
+    - `restoreSpecialty` moved from the describe's `beforeEach` to the test's own parameters, with a comment like the one in `dialog-boxes.spec.ts`.
+  - **`SpecialtiesPage`:**
+    - `editSpecialty` was renamed to `openEditSpecialty` and no longer reads or returns the input's DOM `id`.
+    - `expectSpecialtyAtRow(rowId, specialty)` was replaced by `expectSpecialtyListed(specialty)` and `expectSpecialtyNotListed(specialty)`. Both use `expect.poll` over the live input values, with custom messages.
+    - The input-value read moved into a private `readSpecialtyValues()` helper with the "bound by Angular" comment, instead of being built again inline.
+    - The pet-type comment left over from the copy is gone.
+  - **Rows by role in both pages:** `locator('tbody tr')` became `getByRole('row').filter({ has: getByRole('textbox') })`, and the value reads use `getByRole('row').getByRole('textbox')`. In `PetTypesPage` this applies to `readPetTypeValues`, `findPetTypeRow` and `expectPetTypeAtLastRow`.
+- **Why:**
+  - **Missing goal check:** the test read the vets list before the rename but never after, so it didn't show the rename reaches the vets. Its name didn't describe the flow either.
+  - **Restore fixture placement:** only this test in the describe changes data. In `beforeEach`, any later read-only test would pay for the snapshot and cleanup API calls.
+  - **Accurate method name:** `editSpecialty` only opens the edit page. The name now matches `PetTypesPage.openEditPetType`.
+  - **No row ids:** the row id is just the DOM index, so it leaked a DOM detail into the test and depended on list order. "New name listed, old name gone" is what the user sees.
+  - **Rows by role:** the scripting rules don't allow structural CSS paths. Only body rows contain a textbox, so the filter skips the header row.
+  - **Not done:** renaming a specialty created just for this test would mean assigning it to a vet, which still changes shared vet data. The restore fixture already undoes the rename, even after a failure.
+- **Verified:**
+  - `npx playwright test tests/web-tables.spec.ts tests/dialog-boxes.spec.ts tests/input-fields.spec.ts tests/checkboxes.spec.ts` passes 15 of 15 against the live app. `dialog-boxes` and `input-fields` cover the `PetTypesPage` locator change.
+  - Running the rename test again passed. It first asserts Rafael Ortega has `surgery`, which confirms the fixture restored the name.
+
+### Changed: vet specialities test checks the exact set of specialities, order-independent, without `nth-child`
+
+- **Files:** `playwright-utils/pages/veterinarians-page.ts`, `tests/web-tables.spec.ts`
+- **What changed:**
+  - `expectSpeciality(vetName, speciality)` became `expectSpecialities(vetName, ...specialities)`.
+    - The cell locator `locator('td:nth-child(2)')` became `.getByRole('cell').nth(1)`.
+    - `toContainText` became `expect.poll` over the cell's `innerText()`, split on new lines, trimmed and sorted, then `toEqual` against the sorted expected names. It has a custom message, the same pattern as `EditVeterinarianPage.expectSelectedSpecialities`.
+  - `editVeterinarian`: the row locator `getByRole('row', { name: \`${vetName}\` })` became the same exact-cell filter `expectSpecialities` uses. The redundant template literal is gone.
+  - Spec: `openHome()` moved to a file-level `test.beforeEach`, so each describe's `beforeEach` only opens its own page. The describe `Testing Veterinarian Page` became `Veterinarians page`. The test `Correct speciality is associated with the Veterinarian ` (trailing space) became `Veterinarians list shows each vet's specialities`. The blank lines in the test body are gone. The call is now `expectSpecialities('Linda Douglas', 'surgery', 'dentistry')`.
+- **Why:**
+  - **Assertion was too loose:** `toContainText('surgery dentistry')` passed for extra specialities and for partial text (`'surg'`). It also depended on display order. A probe on the live app showed Linda Douglas renders `dentistry` then `surgery`, each in its own `<div>`, so the order is not stable. Vets with none have an empty cell, not "none".
+  - **No column positions:** the scripting rules don't allow structural CSS paths. `nth(1)` on role `cell` keeps the locator role-based. The app source isn't available, so a `data-testid` can't be added. Columns are Name, Specialties, Edit, Delete.
+  - **Exact row match in `editVeterinarian`:** the row's accessible name matches any substring of the whole row's text, so `Linda Douglas` would also match `Linda Douglass`.
+  - **Naming:** "Specialities" and rest parameters match `EditVeterinarianPage`. The test name describes user behaviour, as the naming rule asks.
+- **Verified:**
+  - `npx playwright test tests/web-tables.spec.ts tests/checkboxes.spec.ts` passes 10 of 10 against the live app. `checkboxes.spec.ts` covers `editVeterinarian`.
+  - A temporary negative spec (deleted afterwards) showed `('Linda Douglas', 'surgery')` and `('Linda Douglas', 'surg', 'dentistry')` now fail, and `('James Carter')` with no specialities passes.
+
+### Changed: renamed the last-name search test to describe user behaviour
+
+- **File:** `tests/web-tables.spec.ts`
+- **What changed:** `Validate search by Last Name` became `Search by last name shows only matching owners`. The test body is unchanged.
+- **Why:** the scripting rules ask for test names that describe user behaviour, not implementation. This was the last test in the spec with a "Validate…" name.
+- **Verified:** `npx playwright test tests/web-tables.spec.ts` passes 6 of 6 against the live app.
+
+### Changed: city methods on `OwnersPage` use role-based locators instead of `nth-child` column positions
+
+- **Files:** `playwright-utils/pages/owners-page.ts`, `tests/web-tables.spec.ts`
+- **What changed:**
+  - `expectOwnerCountInCity`: `locator('tbody tr td:nth-child(3)').getByText(cityName, { exact: true })` became `getByRole('cell', { name: cityName, exact: true })`. The `:nth-child` comment was replaced with one explaining why the exact cell match only finds City cells.
+  - `expectPetsInCity(cityName, petsName)` was renamed to `expectPetNamesInCity(cityName, petNames)`.
+    - The row filter `has: locator('td:nth-child(3)').getByText(...)` became `has: getByRole('cell', { name: cityName, exact: true })`.
+    - The pet locator `locator('td:nth-child(5) tr')` became `.getByRole('cell').getByRole('row')`.
+    - The long line is split over two lines, the stray blank line is removed, and a comment was added.
+  - Spec: `Validate owners count of the Madison city` became `Owners list shows the number of owners in Madison`. `Validate pets of the Madison City` became `Owners list shows the pets of owners in Madison` and calls the renamed method.
+- **Why:**
+  - **No column positions:** `nth-child(3)` and `nth-child(5)` depend on the column order. The scripting rules allow CSS only for scoping to stable tags, not structural paths. If a column were added or moved, the test would silently read the wrong column.
+  - **Exact cell match:** no Name, Address or Telephone cell equals a city name exactly, so the match only finds City cells.
+  - **Pet locator:** `.getByRole('cell').getByRole('row')` is the same pattern `openOwnerInformationByTelephone` uses, because only the Pets cell holds the nested pet rows.
+  - **Names:** `petNames` matches `expectPetNames` and the rest of the file. The test names now describe user behaviour, as the naming rule asks.
+  - A temporary probe test (deleted afterwards) confirmed on the live app that the old and new locators return the same pets, `["Leo","George","Mulligan","Freddy"]`, and that `getByRole('cell', { name: 'Madison', exact: true })` matches exactly 4 cells. The columns are Name, Address, City, Telephone, Pets.
+- **Verified:** `npx playwright test tests/web-tables.spec.ts` passes 6 of 6 against the live app.
+
+### Changed: merged `expectOwnerTelephone` into `expectOwnerInformation` with an options object
+
+- **Files:** `playwright-utils/pages/owner-information-page.ts`, `tests/web-tables.spec.ts`
+- **What changed:**
+  - The signature went from `expectOwnerInformation(ownerName, ownerCity?)` to `expectOwnerInformation(ownerName, { city, telephone } = {})`.
+  - The method builds `{ Name, City, Telephone }`, keyed by the owner table's row header texts. It loops over them and skips values that are `undefined`. Each check uses the same row-header locator: `getByRole('row').filter({ has: getByRole('rowheader', { name, exact: true }) }).getByRole('cell')`, then `toHaveText`. The heading check is unchanged.
+  - Removed `expectOwnerTelephone`.
+  - Spec: `('Jeff Black', 'Monona')` became `('Jeff Black', { city: 'Monona' })`. The telephone test now makes one call, `expectOwnerInformation(ownerName, { telephone })`, instead of two. `lists-and-dropdowns.spec.ts` passes only the name and needed no change.
+- **Why:**
+  - `expectOwnerTelephone` and the City check differed only in the row header and the value. The architecture rules say to parametrize instead of keeping two methods like that.
+  - **Options object instead of a third positional parameter:** checking the phone without the city would otherwise need `(ownerName, undefined, telephone)`. Named keys make each call clear, and Address can be added later as one more key.
+  - **The loop:** keeps one copy of the row-header locator instead of three.
+  - **`=== undefined` instead of `if (ownerCity)`:** an empty string is no longer treated as "not passed".
+- **Verified:** `npx playwright test tests/web-tables.spec.ts tests/lists-and-dropdowns.spec.ts` passes 7 of 7 against the live app.
+
+### Changed: telephone test finds the owner by the exact phone cell, clicks the row's own link, and also checks the owner name
+
+- **Files:** `playwright-utils/pages/owners-page.ts`, `playwright-utils/pages/owner-information-page.ts`, `tests/web-tables.spec.ts`
+- **What changed:**
+  - **Row locator:** `locator('tbody tr').filter({ has: getByText(telephone) })` became `getByRole('row').filter({ has: getByRole('cell', { name: telephone, exact: true }) })`.
+  - **Shared navigation helper:** the click, the `GET /api/owners/<id>` response check and the URL check moved from `openOwnerInformation` into a new private method `openOwnerInformationFromLink(ownerLink: Locator)`. `openOwnerInformation(ownerName)` now passes its name link to it. Its behaviour is unchanged for existing callers.
+  - **Telephone method:** renamed `openOwnerInformationUsingTelephone` to `openOwnerInformationByTelephone`. It now clicks `ownerRow.getByRole('link')` through the helper instead of reading the name and searching the table again. It reads the name with `innerText()` instead of `textContent()` + `!`, and returns `{ ownerName, petNames }` instead of only `petNames`.
+  - **Spec:** the test is renamed to `Owner found by telephone shows the same phone and pets on Owner Information`. The number is stored once in `const telephone`, and the test now also calls `expectOwnerInformation(ownerName)`.
+  - **`owner-information-page.ts`:** `expectOwnerTelephone` is split over two lines like `expectOwnerInformation`, and the three stray blank lines after it are removed.
+- **Why:**
+  - **Exact phone cell:** `getByText(telephone)` was a partial match anywhere in the row, so a shorter number could match another owner's row. `getByRole('row')` + `getByRole('cell')` is also higher in the project's locator priority than the CSS `tbody tr`. The nested pet rows have no telephone cell, so only the owner row matches.
+  - **Click the row's link:** re-finding the link by name was a partial match across the whole table ("Jeff Black" would also match "Jeff Blackwell"). It also threw away the row already found. `textContent()` can return `null`, which the `!` hid. `innerText()` returns a string and gives the rendered text.
+  - **Private helper:** keeps one copy of the navigation and its checks (the "reuse first" rule) without adding a public tiny method to the page object.
+  - **Owner name check:** the project's cross-page content linking rule says to capture a value from the source page and assert it on the destination. `expectOwnerInformation` also checks the "Owner Information" heading, so the test confirms both the page and the owner.
+  - **`const telephone` and the test name:** the value can't drift between the action and the check, and the name describes user behaviour as the naming rule asks.
+- **Verified:** `npx playwright test tests/web-tables.spec.ts tests/lists-and-dropdowns.spec.ts` passes 7 of 7 against the live app. `lists-and-dropdowns` was included because it also calls `openOwnerInformation`. `npx tsc` isn't available (TypeScript isn't a direct dependency), so types were checked only by Playwright's transpile step.
+
+### Changed: `expectPetNames` checks the pet names with one exact `toHaveText([...])` assertion
+
+- **File:** `playwright-utils/pages/owner-information-page.ts`
+- **What changed:** replaced the regex built from `petNames.join('|')`, the `petCells.first()` visibility guard and the `for ... of await petCells.all()` loop with one assertion: `toHaveText(petNames)` on every pet cell's `dt:text-is("Name") + dd`. The test itself is unchanged.
+- **Why:**
+  - The user wants the test to compare the pet names shown in the Owners list with those on the Owner Information page, not hard-coded values. The test already did that: `openOwnerInformationUsingTelephone` returns the list's names and `expectPetNames` checks them. Only the check was weak.
+  - **One direction only:** the old loop confirmed each displayed pet was somewhere in the list, but not that every listed pet was displayed. A missing pet or a different count still passed.
+  - **Loose match:** `toContainText(/a|b/i)` was a partial, case-insensitive match ("Leo" would accept "Leonardo"), and the names weren't escaped for the regex.
+  - `toHaveText` with an array checks the count, the order and an exact (whitespace-normalized) match for every name, and it retries. That makes the guard and the loop unnecessary.
+  - **No pets:** the old `.first()` guard failed for an owner with no pets. `toHaveText([])` passes when no pet cells exist, which is the right result when the list also shows no pets.
+- **Verified:** `npx playwright test tests/web-tables.spec.ts` passes 5 of 5 against the live app. A temporary probe test (deleted afterwards) ran the same flow for a two-pet owner (phone 6085558763, `["Jewel", "Rosy"]`) and passed, confirming both pages list pets in the same order.
+
+### Changed: `openOwnerInformationUsingTelephone` reads pet names with `allInnerTexts()` instead of `allTextContents()` + `trim()`
+
+- **File:** `playwright-utils/pages/owners-page.ts`
+- **What changed:** `(await ...allTextContents()).map(petName => petName.trim())` became `await ...allInnerTexts()`. The comment above it was updated to say why.
+- **Why:**
+  - The pet row's HTML is `<tr> George </tr>`. `allTextContents()` returns the raw DOM text (`" George "`), which needed a manual `trim()`. `allInnerTexts()` returns the text as the browser renders it, so the whitespace is already removed.
+  - A temporary probe test (deleted afterwards) confirmed it on the live app: one-pet owner `[" George "]` vs `["George"]`, two-pet owner `[" Jewel ", " Rosy "]` vs `["Jewel", "Rosy"]`.
+  - Rendered text also matches what the user sees: text hidden with CSS is left out, which suits a UI test. Each pet row holds only the name, so `innerText`'s tab and newline joining between cells doesn't apply.
+  - Everything else is unchanged. Neither method waits or requires exactly one match, and both return `[]` when nothing matches, so the `await expect(ownerRow).toBeVisible()` guard is still needed.
+- **Verified:** `npx playwright test tests/web-tables.spec.ts` passes 5 of 5 against the live app.
+
+### Fixed: `openOwnerInformationUsingTelephone` now awaits the navigation and always collects the real pet names
+
+- **File:** `playwright-utils/pages/owners-page.ts`
+- **What changed:**
+  - Added the missing `await` before `this.openOwnerInformation(ownerName!)`.
+  - Removed the `let petNames = ['']` default and the `if (await ... .isVisible())` branch. The method now calls `allTextContents()` on the owner's pet rows directly and trims each name: `.map(petName => petName.trim())`.
+- **Why:**
+  - **Missing `await`:** without it the method returned before the click, the `GET /api/owners/<id>` response check and the URL check had finished. A failure in those checks surfaced as an unhandled rejection instead of failing the step. The test passed only because the next assertion (`expectOwnerTelephone`) retried until the page loaded.
+  - **`isVisible()` removed:** `isVisible()` is strict, so an owner with two or more pets would throw a strict-mode violation. It also doesn't retry, so its result depended on timing.
+  - **`['']` default removed:** an empty name made `expectPetNames` build `new RegExp('')`, which matches any text, so the pet name check could never fail. `allTextContents()` already returns `[]` when there are no pet rows, so no default is needed. It's safe to call without waiting because `await expect(ownerRow).toBeVisible()` guards it, and the pet rows render together with the owner row.
+  - **`trim()`:** the raw row text is `" George "`. After removing the `['']` default, the untrimmed name built the regex `/ George /i`, which didn't match the `dd` text `"George"`. The test failed on the first run, which confirmed the old version had been a false pass.
+- **Verified:** `npx playwright test tests/web-tables.spec.ts` passes 5 of 5 against the live app. Before the `trim()` fix the telephone test failed with `Expected pattern: / George /i, Received string: "George"`.
+
+---
+
 ## 2026-11-03
 
 ### Changed: dialog-boxes spec uses unique names, checks the dialog message in the test, and covers dismissing the dialog
