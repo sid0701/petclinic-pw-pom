@@ -5,6 +5,7 @@ import { petclinicApiUrl } from '../helpers/api-urls'
 export type TestOptions = {
     pom: PageManager
     restorePetTypes: void
+    restoreSpecialty: void
     restoreVetSpecialties: void
     restorePetTypeOfPets: void
 }
@@ -38,6 +39,31 @@ export const test = base.extend<TestOptions>({
         for (const currentPetType of currentPetTypes) {
             if (!originalPetTypes.some(petType => petType.id === currentPetType.id)) {
                 const deleteResponse = await request.delete(`${petclinicApiUrl}/pettypes/${currentPetType.id}`)
+                expect(deleteResponse.ok(), `DELETE ${deleteResponse.url()} returned ${deleteResponse.status()}`).toBeTruthy()
+            }
+        }
+    },
+
+    //Snapshot specialties before the test, then restore renamed ones and delete added ones afterwards, even if the test fails
+    restoreSpecialty: async ({ request }, use) => {
+        const originalSpecialtiesResponse = await request.get(`${petclinicApiUrl}/specialties`)
+        expect(originalSpecialtiesResponse.ok(), `GET ${originalSpecialtiesResponse.url()} returned ${originalSpecialtiesResponse.status()}`).toBeTruthy()
+        const originalSpecialties: { id: number, name: string }[] = await originalSpecialtiesResponse.json()
+
+        await use()
+
+        const currentSpecialtiesResponse = await request.get(`${petclinicApiUrl}/specialties`)
+        const currentSpecialties: { id: number, name: string }[] = await currentSpecialtiesResponse.json()
+        for (const originalSpecialty of originalSpecialties) {
+            const currentSpecialty = currentSpecialties.find(specialty => specialty.id === originalSpecialty.id)
+            if (currentSpecialty && currentSpecialty.name !== originalSpecialty.name) {
+                const restoreResponse = await request.put(`${petclinicApiUrl}/specialties/${originalSpecialty.id}`, { data: originalSpecialty })
+                expect(restoreResponse.ok(), `PUT ${restoreResponse.url()} returned ${restoreResponse.status()}`).toBeTruthy()
+            }
+        }
+        for (const currentSpecialty of currentSpecialties) {
+            if (!originalSpecialties.some(specialty => specialty.id === currentSpecialty.id)) {
+                const deleteResponse = await request.delete(`${petclinicApiUrl}/specialties/${currentSpecialty.id}`)
                 expect(deleteResponse.ok(), `DELETE ${deleteResponse.url()} returned ${deleteResponse.status()}`).toBeTruthy()
             }
         }
