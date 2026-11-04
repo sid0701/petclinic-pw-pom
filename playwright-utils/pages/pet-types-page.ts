@@ -55,7 +55,8 @@ export class PetTypesPage {
 
     async addNewPetType(petType: string) {
         await this.page.getByRole('button', { name: 'Add' }).click()
-        await expect(this.page.getByRole('heading', { level: 2 }).last()).toHaveText('New Pet Type')
+        await expect(this.page.getByRole('heading', { level: 2, name: 'New Pet Type' })).toBeVisible()
+        // The "Name" caption is not a <label>, so the input has no accessible name; its stable id is the only hook
         await this.page.locator('#name').fill(petType)
         const clickSaveResponse = this.page.waitForResponse(response =>
             /\/api\/pettypes$/.test(response.url()) && response.request().method() === 'POST')
@@ -64,23 +65,40 @@ export class PetTypesPage {
         expect(saveResponse.ok(), `POST ${saveResponse.url()} returned ${saveResponse.status()}`).toBeTruthy()
     }
 
-    async deletePetType(petType: string) {
+    // Returns the confirmation dialog's message so the test can assert it with expectDeleteDialogMessage
+    async deletePetType(petType: string, { accept = true }: { accept?: boolean } = {}): Promise<string> {
         const petTypeRow = await this.findPetTypeRow(petType)
 
-        const clickDeleteResponse = this.page.waitForResponse(response =>
-            /\/api\/pettypes\/\d+$/.test(response.url()) && response.request().method() === 'DELETE')
+        // Only an accepted dialog sends the DELETE request
+        const clickDeleteResponse = accept
+            ? this.page.waitForResponse(response =>
+                /\/api\/pettypes\/\d+$/.test(response.url()) && response.request().method() === 'DELETE')
+            : undefined
 
-        // The browser dialog blocks the click until handled, so accept first and assert its message afterwards
+        // The browser dialog blocks the click until handled, so handle it in a listener and capture its message
         let dialogMessage = ''
         this.page.once('dialog', async dialog => {
             dialogMessage = dialog.message()
-            await dialog.accept()
+            if (accept) {
+                await dialog.accept()
+            } else {
+                await dialog.dismiss()
+            }
         })
         await petTypeRow.getByRole('button', { name: 'Delete' }).click()
 
-        const deleteResponse = await clickDeleteResponse
-        expect(dialogMessage).toBe('Delete the pet type?')
-        expect(deleteResponse.ok(), `DELETE ${deleteResponse.url()} returned ${deleteResponse.status()}`).toBeTruthy()
+        if (clickDeleteResponse) {
+            const deleteResponse = await clickDeleteResponse
+            expect(deleteResponse.ok(), `DELETE ${deleteResponse.url()} returned ${deleteResponse.status()}`).toBeTruthy()
+        } else {
+            await expect(petTypeRow.getByRole('textbox')).toHaveValue(petType)
+        }
+        return dialogMessage
+    }
+
+    // The dialog is a native browser dialog, not a DOM element, so its captured message is asserted directly
+    async expectDeleteDialogMessage(dialogMessage: string, expectedMessage: string) {
+        expect(dialogMessage).toBe(expectedMessage)
     }
 
 }
