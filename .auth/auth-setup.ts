@@ -5,7 +5,13 @@ const filePath = '.auth/user.json';
 
 async function browserAuthorize(config: FullConfig){
     const { baseURL, storageState } = config.projects[0].use;
-   
+
+    // Fail fast: a missing value otherwise only shows up as a timeout waiting for **/token
+    const missingCredentials = ['EMAIL', 'PASSWORD'].filter(name => !process.env[name]);
+    if (missingCredentials.length > 0) {
+        throw new Error(`Missing required credentials: ${missingCredentials.join(', ')}. Set them in .env locally, or as repository secrets for GitHub Actions.`);
+    }
+
     let user: any;
     try {
         const data = await fs.readFile(filePath);
