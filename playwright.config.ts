@@ -1,6 +1,7 @@
-import { defineConfig, devices } from '@playwright/test';
+import { defineConfig } from '@playwright/test'
+import * as dotenv from 'dotenv'
 
-require('dotenv').config();
+dotenv.config({ quiet: true })
 
 export default defineConfig({
   fullyParallel: false,

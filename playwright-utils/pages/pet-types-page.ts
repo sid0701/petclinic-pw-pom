@@ -90,6 +90,8 @@ export class PetTypesPage {
     }
 
     // The dialog is a native browser dialog, not a DOM element, so its captured message is asserted directly
+    // Kept async so every expect* method is awaited the same way in tests
+    // eslint-disable-next-line @typescript-eslint/require-await
     async expectDeleteDialogMessage(dialogMessage: string, expectedMessage: string) {
         expect(dialogMessage).toBe(expectedMessage)
     }

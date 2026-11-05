@@ -1,7 +1,8 @@
 {
-    "compileOnSave": true,
     "compilerOptions": {
+        "strict": true,
+        "noEmit": true,
         "types": ["node"]
     },
-     "include": ["**/*.ts", ".auth/**/*.ts"]
+    "include": ["**/*.ts", ".auth/**/*.ts"]
 }
