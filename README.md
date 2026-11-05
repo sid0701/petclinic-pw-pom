@@ -16,7 +16,7 @@ comparison.
 ## Highlights
 
 - **Page Object Model with a single `pom` fixture.** A `PageManager` builds every page object, so tests never
-  construct pages themselves and read as *action → action → validation*.
+  construct pages themselves and read as _action → action → validation_.
 - **Self-cleaning tests.** Custom fixtures snapshot data through the PetClinic REST API before a test and
   restore it afterwards, **even when the test fails**, so the shared environment stays consistent.
 - **Log in once per run.** Global setup signs in, saves the browser session (`storageState`) and captures the
@@ -29,13 +29,13 @@ comparison.
 
 ## Tech Stack
 
-| | |
-| --- | --- |
-| Test runner | [Playwright Test](https://playwright.dev) 1.64 |
-| Language | TypeScript on Node.js 24 |
-| CI | GitHub Actions + `mcr.microsoft.com/playwright` container |
+|              |                                                                                           |
+| ------------ | ----------------------------------------------------------------------------------------- |
+| Test runner  | [Playwright Test](https://playwright.dev) 1.64                                            |
+| Language     | TypeScript on Node.js 24                                                                  |
+| CI           | GitHub Actions + `mcr.microsoft.com/playwright` container                                 |
 | Code quality | TypeScript `strict`, ESLint 9 (`typescript-eslint`, `eslint-plugin-playwright`), Prettier |
-| Config | `dotenv` for local credentials, GitHub repository secrets in CI |
+| Config       | `dotenv` for local credentials, GitHub repository secrets in CI                           |
 
 ---
 
@@ -43,13 +43,13 @@ comparison.
 
 19 tests across 5 spec files:
 
-| Spec | Area | Scenarios |
-| --- | --- | --- |
-| `input-fields.spec.ts` | Pet types: editing | Rename and rename back, cancel an edit, required-name validation |
-| `dialog-boxes.spec.ts` | Pet types: delete dialog | Accept the confirmation to delete, dismiss it to keep the pet type |
-| `checkboxes.spec.ts` | Vet specialties dropdown | Check selected specialties, select all, unselect all |
-| `lists-and-dropdowns.spec.ts` | Pet type select | Selected pet type in the list, update a pet's type |
-| `web-tables.spec.ts` | Owners & veterinarians tables | Owner details, city filtering, search by last name (incl. no results), search by phone; renamed, added and deleted specialties shown on vets |
+| Spec                          | Area                          | Scenarios                                                                                                                                    |
+| ----------------------------- | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `input-fields.spec.ts`        | Pet types: editing            | Rename and rename back, cancel an edit, required-name validation                                                                             |
+| `dialog-boxes.spec.ts`        | Pet types: delete dialog      | Accept the confirmation to delete, dismiss it to keep the pet type                                                                           |
+| `checkboxes.spec.ts`          | Vet specialties dropdown      | Check selected specialties, select all, unselect all                                                                                         |
+| `lists-and-dropdowns.spec.ts` | Pet type select               | Selected pet type in the list, update a pet's type                                                                                           |
+| `web-tables.spec.ts`          | Owners & veterinarians tables | Owner details, city filtering, search by last name (incl. no results), search by phone; renamed, added and deleted specialties shown on vets |
 
 ---
 
@@ -75,12 +75,12 @@ A test then reads like the user story:
 
 ```ts
 test('User can add a pet type and delete it by accepting the confirmation dialog', async ({ pom }) => {
-    const petType = `pig-${Date.now()}`
-    await pom.petTypesPage.addNewPetType(petType)
-    await pom.petTypesPage.expectPetTypeAtLastRow(petType)
-    const dialogMessage = await pom.petTypesPage.deletePetType(petType)
-    await pom.petTypesPage.expectDeleteDialogMessage(dialogMessage, 'Delete the pet type?')
-    await pom.petTypesPage.expectPetTypeNotListed(petType)
+  const petType = `pig-${Date.now()}`
+  await pom.petTypesPage.addNewPetType(petType)
+  await pom.petTypesPage.expectPetTypeAtLastRow(petType)
+  const dialogMessage = await pom.petTypesPage.deletePetType(petType)
+  await pom.petTypesPage.expectDeleteDialogMessage(dialogMessage, 'Delete the pet type?')
+  await pom.petTypesPage.expectPetTypeNotListed(petType)
 })
 ```
 
@@ -89,12 +89,12 @@ test('User can add a pet type and delete it by accepting the confirmation dialog
 The tests run against a **shared, live** environment, so every test that changes data requests a fixture that
 puts it back:
 
-| Fixture | Restores |
-| --- | --- |
-| `restorePetTypes` | Renamed pet types; deletes pet types the test added |
-| `restoreSpecialty` | Renamed specialties; deletes specialties the test added |
-| `restoreVetSpecialties` | Each vet's assigned specialties |
-| `restorePetTypeOfPets` | Each pet's type |
+| Fixture                 | Restores                                                |
+| ----------------------- | ------------------------------------------------------- |
+| `restorePetTypes`       | Renamed pet types; deletes pet types the test added     |
+| `restoreSpecialty`      | Renamed specialties; deletes specialties the test added |
+| `restoreVetSpecialties` | Each vet's assigned specialties                         |
+| `restorePetTypeOfPets`  | Each pet's type                                         |
 
 Each one reads the current data from the API, runs the test with `use()`, then compares and restores. The
 teardown runs whether the test passed or failed.
@@ -134,17 +134,17 @@ PASSWORD='your-password'
 
 ### Running Tests
 
-| Command | Description |
-| --- | --- |
-| `npm test` | Run the whole suite |
-| `npx playwright test tests/web-tables.spec.ts` | Run one spec file |
-| `npx playwright test -g "pet type"` | Run tests whose title matches |
-| `npx playwright test --ui` | Open UI mode |
-| `npx playwright test --headed` | Watch the browser |
-| `npx playwright show-report` | Open the last HTML report |
-| `npm run typecheck` | Type-check with `tsc` (Playwright itself doesn't check types) |
-| `npm run lint` / `npm run lint:fix` | Run ESLint / fix what it can |
-| `npm run format` / `npm run format:check` | Format with Prettier / check formatting |
+| Command                                        | Description                                                   |
+| ---------------------------------------------- | ------------------------------------------------------------- |
+| `npm test`                                     | Run the whole suite                                           |
+| `npx playwright test tests/web-tables.spec.ts` | Run one spec file                                             |
+| `npx playwright test -g "pet type"`            | Run tests whose title matches                                 |
+| `npx playwright test --ui`                     | Open UI mode                                                  |
+| `npx playwright test --headed`                 | Watch the browser                                             |
+| `npx playwright show-report`                   | Open the last HTML report                                     |
+| `npm run typecheck`                            | Type-check with `tsc` (Playwright itself doesn't check types) |
+| `npm run lint` / `npm run lint:fix`            | Run ESLint / fix what it can                                  |
+| `npm run format` / `npm run format:check`      | Format with Prettier / check formatting                       |
 
 Tests run one at a time (`workers: 1`), because they share data on the live environment.
 

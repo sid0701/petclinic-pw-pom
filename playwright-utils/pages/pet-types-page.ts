@@ -1,13 +1,14 @@
-import { type Page, expect } from "@playwright/test";
+import { type Page, expect } from '@playwright/test'
 
 export class PetTypesPage {
-
-    constructor(private page: Page) { }
+    constructor(private page: Page) {}
 
     // Values are bound by Angular, not rendered as text, so they are read from the live inputs
     private readPetTypeValues() {
-        return this.page.getByRole('row').getByRole('textbox').evaluateAll(
-            inputs => inputs.map(input => (input as HTMLInputElement).value))
+        return this.page
+            .getByRole('row')
+            .getByRole('textbox')
+            .evaluateAll((inputs) => inputs.map((input) => (input as HTMLInputElement).value))
     }
 
     private async findPetTypeRow(petType: string) {
@@ -25,8 +26,9 @@ export class PetTypesPage {
 
     async openEditPetType(petType: string) {
         const petTypeRow = await this.findPetTypeRow(petType)
-        const clickEditResponse = this.page.waitForResponse(response =>
-            /\/api\/pettypes\/\d+$/.test(response.url()) && response.request().method() === 'GET')
+        const clickEditResponse = this.page.waitForResponse(
+            (response) => /\/api\/pettypes\/\d+$/.test(response.url()) && response.request().method() === 'GET',
+        )
         await petTypeRow.getByRole('button', { name: 'Edit' }).click()
         const editResponse = await clickEditResponse
         expect(editResponse.ok(), `GET ${editResponse.url()} returned ${editResponse.status()}`).toBeTruthy()
@@ -35,15 +37,25 @@ export class PetTypesPage {
 
     // Input values can't be matched by a locator, so poll the live values to retry like a locator assertion
     async expectPetTypeListed(petType: string) {
-        await expect.poll(() => this.readPetTypeValues(), { message: `"${petType}" should be listed` }).toContain(petType)
+        await expect
+            .poll(() => this.readPetTypeValues(), { message: `"${petType}" should be listed` })
+            .toContain(petType)
     }
 
     async expectPetTypeAtLastRow(petType: string) {
-        await expect(this.page.getByRole('row').filter({ has: this.page.getByRole('textbox') }).last().getByRole('textbox')).toHaveValue(petType)
+        await expect(
+            this.page
+                .getByRole('row')
+                .filter({ has: this.page.getByRole('textbox') })
+                .last()
+                .getByRole('textbox'),
+        ).toHaveValue(petType)
     }
 
     async expectPetTypeNotListed(petType: string) {
-        await expect.poll(() => this.readPetTypeValues(), { message: `"${petType}" should not be listed` }).not.toContain(petType)
+        await expect
+            .poll(() => this.readPetTypeValues(), { message: `"${petType}" should not be listed` })
+            .not.toContain(petType)
     }
 
     async addNewPetType(petType: string) {
@@ -51,8 +63,9 @@ export class PetTypesPage {
         await expect(this.page.getByRole('heading', { level: 2, name: 'New Pet Type' })).toBeVisible()
         // The "Name" caption is not a <label>, so the input has no accessible name; its stable id is the only hook
         await this.page.locator('#name').fill(petType)
-        const clickSaveResponse = this.page.waitForResponse(response =>
-            /\/api\/pettypes$/.test(response.url()) && response.request().method() === 'POST')
+        const clickSaveResponse = this.page.waitForResponse(
+            (response) => /\/api\/pettypes$/.test(response.url()) && response.request().method() === 'POST',
+        )
         await this.page.getByRole('button', { name: 'Save' }).click()
         const saveResponse = await clickSaveResponse
         expect(saveResponse.ok(), `POST ${saveResponse.url()} returned ${saveResponse.status()}`).toBeTruthy()
@@ -64,13 +77,15 @@ export class PetTypesPage {
 
         // Only an accepted dialog sends the DELETE request
         const clickDeleteResponse = accept
-            ? this.page.waitForResponse(response =>
-                /\/api\/pettypes\/\d+$/.test(response.url()) && response.request().method() === 'DELETE')
+            ? this.page.waitForResponse(
+                  (response) =>
+                      /\/api\/pettypes\/\d+$/.test(response.url()) && response.request().method() === 'DELETE',
+              )
             : undefined
 
         // The browser dialog blocks the click until handled, so handle it in a listener and capture its message
         let dialogMessage = ''
-        this.page.once('dialog', async dialog => {
+        this.page.once('dialog', async (dialog) => {
             dialogMessage = dialog.message()
             if (accept) {
                 await dialog.accept()
@@ -82,7 +97,10 @@ export class PetTypesPage {
 
         if (clickDeleteResponse) {
             const deleteResponse = await clickDeleteResponse
-            expect(deleteResponse.ok(), `DELETE ${deleteResponse.url()} returned ${deleteResponse.status()}`).toBeTruthy()
+            expect(
+                deleteResponse.ok(),
+                `DELETE ${deleteResponse.url()} returned ${deleteResponse.status()}`,
+            ).toBeTruthy()
         } else {
             await expect(petTypeRow.getByRole('textbox')).toHaveValue(petType)
         }
@@ -95,5 +113,4 @@ export class PetTypesPage {
     async expectDeleteDialogMessage(dialogMessage: string, expectedMessage: string) {
         expect(dialogMessage).toBe(expectedMessage)
     }
-
 }

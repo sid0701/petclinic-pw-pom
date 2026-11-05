@@ -4,5 +4,11 @@
   "tabWidth": 4,
   "printWidth": 120,
   "trailingComma": "all",
-  "endOfLine": "auto"
+  "endOfLine": "auto",
+  "overrides": [
+    {
+      "files": ["*.yml", "*.yaml", "*.json", "*.md"],
+      "options": { "tabWidth": 2 }
+    }
+  ]
 }

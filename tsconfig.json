@@ -1,8 +1,8 @@
 {
-    "compilerOptions": {
-        "strict": true,
-        "noEmit": true,
-        "types": ["node"]
-    },
-    "include": ["**/*.ts", ".auth/**/*.ts"]
+  "compilerOptions": {
+    "strict": true,
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["**/*.ts", ".auth/**/*.ts"]
 }

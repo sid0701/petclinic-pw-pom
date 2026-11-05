@@ -1,17 +1,16 @@
 import type { Page } from '@playwright/test'
-import { PetTypesPage } from "../pages/pet-types-page";
-import { EditPetTypePage } from "../pages/edit-pet-type-page";
-import { HeaderComponent } from '../pages/header-component';
-import { VeterinariansPage } from '../pages/veterinarians-page';
-import { EditVeterinarianPage } from '../pages/edit-veterinarians-page';
-import { OwnersPage } from '../pages/owners-page';
-import { OwnerInformationPage } from '../pages/owner-information-page';
-import { EditPetPage } from '../pages/edit-pet-page';
-import { SpecialtiesPage } from '../pages/specialties-page';
-import { EditSpecialtyPage } from '../pages/edit-specialty-page';
+import { PetTypesPage } from '../pages/pet-types-page'
+import { EditPetTypePage } from '../pages/edit-pet-type-page'
+import { HeaderComponent } from '../pages/header-component'
+import { VeterinariansPage } from '../pages/veterinarians-page'
+import { EditVeterinarianPage } from '../pages/edit-veterinarians-page'
+import { OwnersPage } from '../pages/owners-page'
+import { OwnerInformationPage } from '../pages/owner-information-page'
+import { EditPetPage } from '../pages/edit-pet-page'
+import { SpecialtiesPage } from '../pages/specialties-page'
+import { EditSpecialtyPage } from '../pages/edit-specialty-page'
 
 export class PageManager {
-
     readonly headerComponent: HeaderComponent
     readonly petTypesPage: PetTypesPage
     readonly editPetTypePage: EditPetTypePage

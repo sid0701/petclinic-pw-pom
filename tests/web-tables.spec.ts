@@ -1,4 +1,4 @@
-import { test } from "../playwright-utils/fixtures/custom-fixtures"
+import { test } from '../playwright-utils/fixtures/custom-fixtures'
 
 test.beforeEach(async ({ pom }) => {
     await pom.headerComponent.openHome()
@@ -41,7 +41,6 @@ test.describe('Owners Page', () => {
     test('Owners list shows the pets of owners in Madison', async ({ pom }) => {
         await pom.ownersPage.expectPetNamesInCity('Madison', ['Leo', 'George', 'Mulligan', 'Freddy'])
     })
-
 })
 
 test.describe('Veterinarians page', () => {

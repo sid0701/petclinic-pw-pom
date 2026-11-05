@@ -6,3 +6,4 @@ package-lock.json
 .auth/user.json
 CHANGELOG.md
 QA.md
+.claude/
