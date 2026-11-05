@@ -1,14 +1,15 @@
-import { type Page, expect } from "@playwright/test"
+import { type Page, expect } from '@playwright/test'
 
 export class SpecialtiesPage {
-
-    constructor(private page: Page) { }
+    constructor(private page: Page) {}
 
     // Values are bound by Angular, not rendered as text, so they are read from the live inputs.
     // Scoped to rows so the New Specialty form's input is never included
     private readSpecialtyValues() {
-        return this.page.getByRole('row').getByRole('textbox').evaluateAll(
-            inputs => inputs.map(input => (input as HTMLInputElement).value))
+        return this.page
+            .getByRole('row')
+            .getByRole('textbox')
+            .evaluateAll((inputs) => inputs.map((input) => (input as HTMLInputElement).value))
     }
 
     private async findSpecialtyRow(specialty: string) {
@@ -26,8 +27,9 @@ export class SpecialtiesPage {
 
     async openEditSpecialty(specialty: string) {
         const specialtyRow = await this.findSpecialtyRow(specialty)
-        const clickEditResponse = this.page.waitForResponse(response =>
-            /\/api\/specialties\/\d+$/.test(response.url()) && response.request().method() === 'GET')
+        const clickEditResponse = this.page.waitForResponse(
+            (response) => /\/api\/specialties\/\d+$/.test(response.url()) && response.request().method() === 'GET',
+        )
         await specialtyRow.getByRole('button', { name: 'Edit' }).click()
         const editResponse = await clickEditResponse
         expect(editResponse.ok(), `GET ${editResponse.url()} returned ${editResponse.status()}`).toBeTruthy()
@@ -36,11 +38,15 @@ export class SpecialtiesPage {
 
     // Input values can't be matched by a locator, so poll the live values to retry like a locator assertion
     async expectSpecialtyListed(specialty: string) {
-        await expect.poll(() => this.readSpecialtyValues(), { message: `"${specialty}" should be listed` }).toContain(specialty)
+        await expect
+            .poll(() => this.readSpecialtyValues(), { message: `"${specialty}" should be listed` })
+            .toContain(specialty)
     }
 
     async expectSpecialtyNotListed(specialty: string) {
-        await expect.poll(() => this.readSpecialtyValues(), { message: `"${specialty}" should not be listed` }).not.toContain(specialty)
+        await expect
+            .poll(() => this.readSpecialtyValues(), { message: `"${specialty}" should not be listed` })
+            .not.toContain(specialty)
     }
 
     async readAllSpecialtyNames() {
@@ -54,8 +60,9 @@ export class SpecialtiesPage {
         await expect(this.page.getByRole('heading', { level: 2, name: 'New Specialty' })).toBeVisible()
         // The "Name" caption is not a <label>, so the input has no accessible name; its stable id is the only hook
         await this.page.locator('#name').fill(specialty)
-        const clickSaveResponse = this.page.waitForResponse(response =>
-            /\/api\/specialties$/.test(response.url()) && response.request().method() === 'POST')
+        const clickSaveResponse = this.page.waitForResponse(
+            (response) => /\/api\/specialties$/.test(response.url()) && response.request().method() === 'POST',
+        )
         await this.page.getByRole('button', { name: 'Save' }).click()
         const saveResponse = await clickSaveResponse
         expect(saveResponse.ok(), `POST ${saveResponse.url()} returned ${saveResponse.status()}`).toBeTruthy()
@@ -65,8 +72,9 @@ export class SpecialtiesPage {
 
     async deleteSpecialty(specialty: string) {
         const specialtyRow = await this.findSpecialtyRow(specialty)
-        const clickDeleteResponse = this.page.waitForResponse(response =>
-            /\/api\/specialties\/\d+$/.test(response.url()) && response.request().method() === 'DELETE')
+        const clickDeleteResponse = this.page.waitForResponse(
+            (response) => /\/api\/specialties\/\d+$/.test(response.url()) && response.request().method() === 'DELETE',
+        )
         await specialtyRow.getByRole('button', { name: 'Delete' }).click()
         const deleteResponse = await clickDeleteResponse
         expect(deleteResponse.ok(), `DELETE ${deleteResponse.url()} returned ${deleteResponse.status()}`).toBeTruthy()

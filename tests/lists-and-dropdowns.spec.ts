@@ -1,4 +1,4 @@
-import { test } from "../playwright-utils/fixtures/custom-fixtures"
+import { test } from '../playwright-utils/fixtures/custom-fixtures'
 
 test.beforeEach(async ({ pom, restorePetTypeOfPets }) => {
     await pom.headerComponent.openHome()

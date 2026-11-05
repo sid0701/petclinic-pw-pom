@@ -1,4 +1,4 @@
-import { test } from "../playwright-utils/fixtures/custom-fixtures"
+import { test } from '../playwright-utils/fixtures/custom-fixtures'
 
 test.describe('Pet type delete dialog', () => {
     // restorePetTypes is requested only so its teardown removes any pet type the test adds

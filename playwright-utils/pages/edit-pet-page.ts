@@ -1,8 +1,7 @@
 import { type Page, expect } from '@playwright/test'
 
 export class EditPetPage {
-
-    constructor(private page: Page) { }
+    constructor(private page: Page) {}
 
     // The Owner and current-Type textboxes have no accessible name (their labels point at other inputs), so they are located by id
     async expectDetails(ownerName: string, petName: string) {
@@ -26,11 +25,15 @@ export class EditPetPage {
 
     async updatePetType(petType: string) {
         await this.page.getByRole('combobox', { name: 'Type' }).selectOption(petType)
-        const clickUpdatePetResponse = this.page.waitForResponse(response =>
-            /\/api\/pets\/\d+$/.test(response.url()) && response.request().method() === 'PUT')
+        const clickUpdatePetResponse = this.page.waitForResponse(
+            (response) => /\/api\/pets\/\d+$/.test(response.url()) && response.request().method() === 'PUT',
+        )
         await this.page.getByRole('button', { name: 'Update Pet' }).click()
         const updatePetResponse = await clickUpdatePetResponse
-        expect(updatePetResponse.ok(), `PUT ${updatePetResponse.url()} returned ${updatePetResponse.status()}`).toBeTruthy()
+        expect(
+            updatePetResponse.ok(),
+            `PUT ${updatePetResponse.url()} returned ${updatePetResponse.status()}`,
+        ).toBeTruthy()
         await expect(this.page).toHaveURL(/\/owners\/\d+$/)
     }
 }
