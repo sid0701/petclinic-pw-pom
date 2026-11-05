@@ -8,7 +8,8 @@ on:
   workflow_dispatch:
 
 # The specs change data on the shared live site, so only one run may happen at a time.
-# Later runs wait instead of cancelling a run that is in progress, so its cleanup still happens.
+# A running run is never cancelled, so its fixture cleanup still happens. At most one newer run
+# waits; if another arrives meanwhile, the older waiting run is cancelled (it never started).
 concurrency:
   group: petclinic-e2e
   cancel-in-progress: false

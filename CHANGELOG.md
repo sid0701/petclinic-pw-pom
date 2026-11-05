@@ -8,6 +8,13 @@ Each entry lists the files changed, what changed, why, and how it was verified. 
 
 ## 2026-11-05
 
+### Changed: corrected the `concurrency` comment in the workflow
+
+- **Files:** `.github/workflows/playwright.yml`
+- **What changed:** the comment above `concurrency` said "later runs wait". It now says only **one** newer run waits, and if another run arrives meanwhile, the older waiting one is cancelled. The settings are unchanged.
+- **Why:** GitHub keeps at most one running and one pending run per concurrency group, and newer pending runs replace older ones. The old wording (also in the "Added: GitHub Actions pipeline" entry below) suggested every later run queues up. A cancelled pending run never started, so no fixture cleanup is skipped.
+- **Verified:** comment-only change; the YAML keys and values are unchanged.
+
 ### Added: global setup fails fast when `EMAIL` or `PASSWORD` is missing
 
 - **Files:** `.auth/auth-setup.ts`

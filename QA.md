@@ -1386,3 +1386,455 @@ Checked with dotenv 17 and no `.env` present: `config()` returned `error: ENOENT
 - **Log line:** dotenv 17 prints `injected env (0) from .env` in CI. It's harmless; `config({ quiet: true })` hides it.
 
 ---
+
+## What does `concurrency` do in `playwright.yml`?
+
+**Date:** 2026-11-05
+**Project:** petclinic-pw-pom (Playwright POM)
+
+**Q:** What exactly does the `concurrency` block in `.github/workflows/playwright.yml` do?
+
+**A:** It stops two runs of the pipeline from testing against the live site at the same time.
+
+```yaml
+concurrency:
+  group: petclinic-e2e
+  cancel-in-progress: false
+```
+
+### How it works
+
+- **`group`** is just a name. GitHub lets **one run per group name be in progress** at a time, across the whole repo. Our name is a fixed string, so every run of this workflow shares one group: any branch, any trigger (push, PR, manual).
+- **`cancel-in-progress: false`**: a new run doesn't stop the one in progress. It waits as **pending** and starts when that run finishes.
+- It's at the top level, so it applies to the whole run, not one job.
+
+### What happens when runs overlap
+
+| Event | Result |
+|---|---|
+| Run A is in progress, run B is triggered | B waits as *pending* |
+| A finishes | B starts |
+| A is in progress, B is pending, then C is triggered | **B is cancelled**, C takes its place. A group holds at most one running and one pending run |
+| Same, with `cancel-in-progress: true` | A is **cancelled in the middle**, and B starts straight away |
+
+So the run that's already going is never interrupted. The cost: if several pushes arrive while a run is going, only the newest one waits, and the ones in between show as *cancelled* (re-run them from the Actions tab if needed). Those runs never started, so nothing was left half done.
+
+### Why we set it up this way
+
+- **Shared data:** the specs rename and delete pet types, specialties and vets on the shared live site. Two runs at the same time could break each other, e.g. one deletes `oncology` while another is checking it.
+- **Cleanup:** `cancel-in-progress: true` could stop a run partway through, before its fixtures restore the data, leaving changes on the server. That's why it's `false`.
+- **Not per-branch:** the common pattern `group: ${{ github.workflow }}-${{ github.ref }}` only stops overlaps **on the same branch**. A run on `main` and a PR run would still overlap, and they share the same data, so we use one fixed name.
+
+### What it doesn't do
+
+- It doesn't control anything **inside** a run. Tests running one after another comes from `workers: 1` / `fullyParallel: false` in `playwright.config.ts`.
+- It only sees GitHub Actions runs in this repo. A local `npx playwright test`, or someone else using the same demo site, can still overlap with a CI run.
+
+---
+
+## What does each part of `playwright.yml` do, and why is it there?
+
+**Date:** 2026-11-05
+**Project:** petclinic-pw-pom (Playwright POM)
+
+**Q:** Explain the attributes used in `.github/workflows/playwright.yml` and why each one was chosen.
+
+**A:** The file has three parts: **when** to run (`on`), **how many at once** (`concurrency`), and **what to do** (`jobs`).
+
+### 1. `name`
+
+```yaml
+name: Playwright Tests
+```
+
+The label shown in the GitHub **Actions** tab and on PR checks. `gh run list --workflow=playwright.yml` finds it by file name either way.
+
+### 2. `on`: what starts a run
+
+```yaml
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+```
+
+| Trigger | Fires when | Why |
+|---|---|---|
+| `push` → `main` | A commit lands on `main`, normally when a PR is merged | Confirms `main` itself is still green after the merge |
+| `pull_request` → `main` | A PR **targeting** `main` is opened or gets new commits | The main check: catches broken tests **before** merge. GitHub tests the PR merged with the latest `main`, not just the branch on its own |
+| `workflow_dispatch` | Someone clicks **Run workflow** in the Actions tab (or runs `gh workflow run`) | Lets you re-check the live app any time without pushing. The button only appears once the file is on `main` |
+
+Pushes to feature branches like `CICD` don't trigger anything by themselves. Otherwise each push to a branch with an open PR would run the suite twice. We left out `schedule` because nightly runs aren't wanted for now.
+
+### 3. `concurrency`
+
+```yaml
+concurrency:
+  group: petclinic-e2e
+  cancel-in-progress: false
+```
+
+Only one run at a time across the repo, and a running run is never cancelled, because the specs change data on the shared live site. Full explanation in the earlier entry "What does `concurrency` do in `playwright.yml`?".
+
+### 4. `jobs`: the work
+
+```yaml
+jobs:
+  test:
+```
+
+A workflow can have several jobs. Each runs on its own fresh machine, and they run in parallel unless linked with `needs:`. We have one job, with the id `test`. That id is the check name shown on the PR, and it's what you'd select when making the check required on `main`.
+
+| Key | Value | What it does / why |
+|---|---|---|
+| `runs-on` | `ubuntu-latest` | A clean Linux VM hosted by GitHub, created for this run and then thrown away. Linux is needed because `container:` uses Docker, and it's also the fastest and cheapest runner |
+| `timeout-minutes` | `30` | Stops the job after 30 minutes. The default is **360**. The suite takes a few minutes, so a hang (e.g. waiting forever for `**/token`) would otherwise use up to 6 hours of Actions minutes |
+| `container.image` | `mcr.microsoft.com/playwright:v1.64.1-noble` | Every step runs inside Microsoft's Playwright Docker image (Ubuntu 24.04 "noble"), which already has Node, Chromium/Firefox/WebKit and their system libraries. That's why there's no `setup-node` or `npx playwright install --with-deps` step. The tag **must match** `@playwright/test` in `package-lock.json`; otherwise Playwright looks for a browser build the image doesn't have and fails with "Executable doesn't exist" |
+
+### 5. `steps`: run in order; if one fails, the rest are skipped unless they say otherwise
+
+Each step either **uses** a ready-made action (`uses:`) or **runs** a shell command (`run:`). `name:` is just the label in the log.
+
+| Step | What / why |
+|---|---|
+| `uses: actions/checkout@v4` | The machine starts empty. This clones the repo at the commit being tested. `@v4` pins the major version so a future v5 can't change behaviour without us knowing |
+| `run: npm ci` | A **clean install** that uses `package-lock.json` exactly. Unlike `npm install`, it never updates the lockfile and fails if `package.json` and the lockfile don't match, so CI uses the same `@playwright/test`, `dotenv` and `faker` versions we use locally |
+| `run: npm test` | Runs the `test` script → `playwright test`. Using the script means CI and local runs use the same command. GitHub Actions sets `CI=true` in every job (container jobs too), which turns on the CI branches in `playwright.config.ts` (`retain-on-failure` trace, `list` + `html` reporter) |
+| `env: EMAIL / PASSWORD` | Copies the repository secrets into the process environment **for this step only**, where `auth-setup.ts` reads `process.env.EMAIL` / `PASSWORD`. Kept on the step rather than the whole job so `npm ci` and the uploads never see them. GitHub masks the values as `***` in logs |
+| `Upload test results` | `actions/upload-artifact@v4` zips `test-results/` and attaches it to the run as an artifact called **`test-results`**. That folder holds the `trace.zip` of each failed test, and `pw-debug-actions` downloads this artifact by that name |
+| `Upload HTML report` | Same for `playwright-report/`, as an artifact called `playwright-report`. Download, unzip, then `npx playwright show-report <folder>` |
+
+Settings on the upload steps:
+
+| Key | Why |
+|---|---|
+| `if: ${{ !cancelled() }}` | By default a step only runs if every step before it passed. When tests fail, `npm test` fails, so without this the uploads would be skipped exactly when we need the traces. `!cancelled()` means "run whether tests passed or failed, but not if someone cancelled the run". `always()` would upload even after a cancel, which isn't useful |
+| `name` | The artifact's name, used by `gh run download <id> --name test-results` |
+| `path` | The folder to upload |
+| `retention-days: 7` | Artifacts are deleted after 7 days instead of the default 90. Traces are only useful for a few days, and this keeps storage use down |
+
+### `${{ ... }}`
+
+GitHub fills these in **before** the step runs: `secrets.EMAIL` reads a secret, and `!cancelled()` is a status check. They aren't shell syntax, which is why they work the same in `env:`, `if:` and elsewhere.
+
+### What a run looks like
+
+1. A PR to `main` is opened → GitHub queues a run (or waits behind one already running, because of `concurrency`).
+2. An Ubuntu VM starts → pulls the Playwright image → checks out the code.
+3. `npm ci` → `npm test` (global setup logs in with the secrets → 19 tests run one at a time).
+4. Both artifacts are uploaded, whether the tests passed or failed.
+5. The `test` check on the PR turns green or red.
+
+---
+
+## On a real production project, do we run E2E tests on every PR like this, or as nightly builds?
+
+**Date:** 2026-11-05
+**Project:** petclinic-pw-pom (Playwright POM)
+
+**Q:** What's the right approach on a project that's in production? Do we use the same approach (tests on push/PR), or nightly builds?
+
+**A:** Both, in **layers**. Each layer runs a different amount of the suite against a different environment. The question isn't "PR or nightly" but "which tests run where, and how fast does each layer need to be".
+
+### The usual layers
+
+| When | What runs | Against | Time budget | Purpose |
+|---|---|---|---|---|
+| **Every PR** (required check) | Lint, type check, unit/API tests, and a **smoke** set of E2E tests (`@smoke`: login, critical journeys) | A fresh environment built from the PR's code: a **preview / ephemeral environment** or `docker compose` with a seeded DB | ~5–15 min | Block broken code before merge. Must be fast or people stop waiting for it |
+| **Merge to `main`** | Deploy to **staging**, then the full or most of the **regression** E2E suite | Staging | ~15–45 min, sharded across machines | Catch what smoke missed, before release |
+| **Nightly** (`schedule`) | The **full** regression across **all browsers / devices**, slow tests, visual tests, sometimes accessibility/performance | Staging (sometimes a nightly build) | Hours are fine | Things too slow or wide for every PR. Spots **flaky** tests, and changes in things outside your control (third-party APIs, data, certificates) |
+| **After each production deploy** | A tiny, **read-only** smoke set: the site loads, login works, key pages render | **Production** | 1–3 min | Confirms the release works. Can trigger a rollback |
+| **Continuously** (every 5–15 min) | Synthetic monitoring: the same read-only checks | Production | Seconds | Finds outages between deploys |
+
+Rule: **never run tests that create, change or delete data against production.** Production checks only read, or use a dedicated test tenant/account that's cleaned up separately.
+
+### What makes this work in a real project
+
+- **Tests run against code they can build.** The app and tests usually live in the same repo (or the pipeline pulls the app image). Each PR gets its **own** environment with seeded data, so runs can't break each other, which removes the need for one `concurrency` lock for everything.
+- **Tags pick the subset:** `test('...', { tag: '@smoke' }, ...)` + `npx playwright test --grep @smoke` on PRs, everything at night.
+- **Sharding** keeps big suites fast: `--shard=1/4` … `4/4` across a matrix of jobs, then `merge-reports`.
+- **Retries in CI** (`retries: 1–2`) with the flaky-test report watched. A test that passes on retry counts as flaky and gets fixed, not ignored.
+- **Required checks + branch protection** on `main`, so a red PR can't be merged.
+- **Nightly results go somewhere visible:** a Slack/Teams message or an issue on failure. A nightly run nobody looks at isn't worth having.
+
+### How this repo compares
+
+This assignment tests a **shared, already-deployed site** we don't build. That's effectively the "production" column, but with tests that change data. That's why we needed a single `concurrency` group, cleanup fixtures and `workers: 1`. For this setup, **running on PR + push to `main` is the right choice**. A nightly run would only add value here for spotting changes to the live site that happen without a push from us, so it was fine to leave it out for now.
+
+If this were a real product, the next steps would be: add `@smoke` tags, run only those on PRs, and move the full suite to post-merge and nightly runs against an environment we control.
+
+---
+
+## With multiple developers, do we raise a PR for every commit, or one PR for everyone's changes together?
+
+**Date:** 2026-11-05
+**Project:** petclinic-pw-pom (Playwright POM)
+
+**Q:** In a normal production project with several developers making changes, do we raise a pull request for every commit, or one pull request for the combined changes of several developers?
+
+**A:** Neither. The norm is **one PR per unit of work**: one feature, bug fix or ticket, usually by one developer, on its own short-lived branch. A PR normally holds **many commits**, and each developer has their **own** PRs.
+
+### Commit vs branch vs PR
+
+| | What it is | How often |
+|---|---|---|
+| **Commit** | A checkpoint while working ("add page object", "fix locator", "address review comment") | Many times a day |
+| **Branch** | Where one piece of work lives, e.g. `feature/vet-search`, `fix/login-timeout` | One per task |
+| **Pull request** | A request to merge **that branch** into `main`: the unit that gets **reviewed, tested by CI and merged** | One per branch / task |
+
+Each new push to a branch with an open PR **updates the same PR**, and CI runs again on it. That's why our workflow triggers on `pull_request`. You don't open a new PR per commit.
+
+### Why not a PR per commit?
+
+- Single commits are often half-finished (they don't build, or tests don't pass yet).
+- Reviewers would see the feature in small pieces without context, and CI would run for every one.
+
+### Why not one PR combining several developers' work?
+
+- **Too big to review well.** Reviews of huge PRs turn into a quick skim. Small PRs (roughly under 300–400 changed lines) get faster, better reviews.
+- **Unclear ownership.** Who answers review comments, and who fixes a failing check?
+- **Everything is blocked together.** One unfinished part holds back all the finished parts, and reverting one change means reverting everyone's.
+
+### Common team setups
+
+- **GitHub flow / trunk-based (most common now):** everyone branches from `main` → small PR → review + green CI → merge, often several times a day per team. `main` is always releasable. This repo already works this way (`webtables`, `dialogboxes`, `CICD` → one PR each).
+- **Gitflow:** feature PRs merge into a `develop` branch. Then a **release PR** (`release/2.4` → `main`) brings in many developers' **already-reviewed** work at once. This is the one place a "combined" PR is normal, and it's a release step, not a code review.
+- **Several developers on one big feature:**
+  - Either they push to a shared `feature/x` branch,
+  - or each opens a small PR **into** `feature/x`, and `feature/x` → `main` is merged at the end.
+  - Or the work is split behind a **feature flag**, so each part can merge to `main` safely before the whole feature is switched on. Teams on trunk-based development often prefer this, because long-lived feature branches cause painful merge conflicts.
+
+### Related practices
+
+- **Draft PRs:** open the PR early as a draft to get CI feedback and early comments. Mark it "Ready for review" when done.
+- **Squash merge:** many teams squash a PR's commits into one commit on `main`, so `main` history reads one entry per feature while the branch keeps the detailed commits.
+- **Branch protection on `main`:** no direct pushes, at least one approval, required CI checks passing, branch up to date with `main`. This is what makes "one PR per task" enforced rather than optional. The local `block-master.sh` hook does the same for this repo on your machine.
+
+---
+
+## Are the staging environment and the QA environment the same thing?
+
+**Date:** 2026-11-05
+**Project:** petclinic-pw-pom (Playwright POM)
+
+**Q:** Is a staging environment the same as a QA environment?
+
+**A:** Not strictly, though many smaller teams have just one environment and use the two names interchangeably. When a company has both, they do different jobs. **QA** is where new work gets tested while it's still changing. **Staging** is a copy of production where the **release candidate** gets a final check before it goes live.
+
+### Where they sit
+
+```
+local → dev / integration → QA (test) → staging (pre-prod) → production
+         changes often ────────────────────────────→ changes rarely, controlled
+```
+
+### The differences
+
+| | QA / test environment | Staging / pre-production |
+|---|---|---|
+| **Purpose** | Test new features and bug fixes as they're built | Final check of the exact build that will be released |
+| **What's deployed** | Every merge, sometimes individual feature branches; several times a day | Only release candidates; deploys are planned and controlled |
+| **Stability** | Often unstable; things break, that's expected | Should be stable; a failure here blocks the release |
+| **Matches production?** | Loosely: smaller servers, some third-party services mocked or using sandboxes, different config | As closely as possible: same infrastructure, versions, config, integrations, security setup |
+| **Data** | Seeded / made-up test data, reset often | Production-like data (often a copy with personal data removed) and realistic amounts of it |
+| **Who uses it** | QA engineers, developers, automated functional/regression suites | QA for final regression, performance/load testing, ops practising the deployment (DB migrations, rollback), sometimes business users for **UAT** (user acceptance testing) |
+| **Typical tests** | Feature testing, exploratory testing, full E2E regression | Smoke + regression of the release, performance, security scans, UAT |
+
+Some companies add a separate **UAT** environment between QA and staging for business sign-off. Others combine QA and staging into one. The names matter less than **what each environment is for**: on a new project, ask which one is "production-like" and which one is for daily testing.
+
+### How it fits the earlier CI layers
+
+In the "production project" answer, "merge to `main` → deploy to staging → full regression" assumed a team with **one** pre-prod environment. With both:
+
+- **Merge to `main`** → auto-deploy to **QA** → full E2E regression.
+- **Release candidate** → deploy to **staging** → smoke + regression of that exact build, performance checks, UAT → approve → **production**.
+- The nightly full run usually targets QA. Some teams run it on staging too.
+
+---
+
+## Are staging and the UAT environment the same thing?
+
+**Date:** 2026-11-05
+**Project:** petclinic-pw-pom (Playwright POM)
+
+**Q:** Is the staging environment the same as the user acceptance testing (UAT) environment?
+
+**A:** Often they're the **same machine used for two purposes**, but they answer different questions:
+
+- **UAT:** "Does this do what the business / client actually needs?" Business users check it and **sign it off**.
+- **Staging:** "Will this exact build deploy and run correctly in a production setup?" Engineering / ops check it **technically**.
+
+Smaller teams do UAT on staging. Larger or regulated organisations (banking, insurance, healthcare, government), and agencies building software for a client, usually keep a **separate UAT environment**.
+
+### The differences
+
+| | UAT environment | Staging environment |
+|---|---|---|
+| **Question it answers** | Does it meet the requirements / work for real business tasks? | Does the release deploy and behave like production? |
+| **Who uses it** | Business users, product owners, the client, sometimes real end users | QA, DevOps/SRE, developers |
+| **Kind of testing** | Mostly **manual**, scenario-based: "process a claim from start to finish", "run month-end billing" | Mostly **automated / technical**: smoke + regression, performance/load, security scans, practising migrations and rollback |
+| **Outcome** | A formal **sign-off / acceptance** (sometimes required by contract or regulation) | Technical go/no-go for the deployment |
+| **How long a build stays** | Days to weeks: the build is **frozen** so users aren't testing something that keeps changing | Short: deploy, check, promote or roll back |
+| **Data** | Realistic business scenarios, sometimes client-specific accounts | Production-like copy and amounts of data |
+| **How closely it matches production** | Good enough to behave correctly for users | As close to identical as possible |
+
+### Common orders
+
+```
+Separate:   QA → UAT → staging → production    (business accepts, then a final technical check)
+            QA → staging → UAT → production    (also used; the order depends on the company)
+Combined:   QA → staging (UAT happens here) → production
+```
+
+### What it means for automation
+
+- Automated E2E suites mostly run in **QA**, plus smoke/regression in **staging**.
+- In **UAT** you usually run a smoke check after each deploy, so business users aren't handed a broken build, and then leave the environment alone. Tests that change data would mess up the scenarios the business users have set up.
+
+As with QA vs staging, the names vary between companies. On a new project, ask who uses each environment and what sign-off happens there.
+
+---
+
+## What's the difference between an E2E suite and a regression suite?
+
+**Date:** 2026-11-05
+**Project:** petclinic-pw-pom (Playwright POM)
+
+**Q:** What's the difference between an end-to-end (E2E) suite and a regression suite?
+
+**A:** They describe **different things**, so they aren't opposites:
+
+- **E2E** describes the **level** of a test: how much of the system it covers. An E2E test drives the real app as a user would (browser → frontend → backend → database) through a complete flow.
+- **Regression** describes the **purpose** of a run: re-running tests that already passed, to prove that **existing** features still work after a change.
+
+So one test can be both. A regression suite can include tests at any level, and an E2E test isn't regression until it's re-run to protect existing features.
+
+### Side by side
+
+| | E2E suite | Regression suite |
+|---|---|---|
+| **Describes** | *How* a test runs: the whole system, as a user | *Why* it's run: catch things that used to work and now don't |
+| **Contains** | Only E2E tests (UI- or API-driven full journeys) | Any mix: unit, API, integration, **and** E2E tests |
+| **Opposite of** | Unit / component / integration tests (smaller scope) | Tests for **new** functionality (feature / acceptance testing) |
+| **When it runs** | Wherever you choose: PR, post-merge, nightly | After any change: every PR, before each release, nightly |
+| **Example** | "Log in → add a vet → assign a specialty → see it in the list" | Every existing test (unit + API + E2E) re-run after a payment-service refactor |
+
+### How they overlap
+
+```
+Regression suite = every test that protects existing features
+├── unit tests
+├── API / integration tests
+└── E2E tests for shipped features   ← what QA teams usually mean by "the regression suite"
+
+Not regression yet:
+└── E2E tests for the feature being built now (they join regression once it ships)
+```
+
+In practice QA teams often say "regression suite" when they mean "**the automated E2E tests we re-run before every release**", which is why the two get mixed up. Developers' unit tests are part of regression too, even if nobody calls them that.
+
+### Related terms
+
+| Term | What it is |
+|---|---|
+| **Smoke suite** | A **small**, fast part of regression: "is the build usable at all?" (login, home page, one key flow). Run on every deploy |
+| **Sanity check** | A quick, narrow check of the **one area just changed / fixed**, before deeper testing |
+| **Full regression** | Everything, often across all browsers, typically before a release or nightly |
+| **Partial regression** | Only tests related to the changed area, chosen by tags or by which files changed |
+
+### This repo
+
+The 19 Playwright tests are **E2E tests**: they drive a real browser against the deployed app, through to its backend. Running them on every PR in CI makes them this project's **regression suite** too. If the suite grew, you'd tag a few as `@smoke` for fast PR checks and run the full set as regression after merge or nightly.
+
+---
+
+## Who writes API and integration tests: developers or testers?
+
+**Date:** 2026-11-05
+**Project:** petclinic-pw-pom (Playwright POM)
+
+**Q:** Who writes the API or integration tests: the developers or the testers?
+
+**A:** Usually **both**, at different levels. It depends on how close the test is to the code. The closer it is, the more likely a **developer** writes it in the same PR as the code. The more it treats the system as a **black box** from outside (the way users and other systems see it), the more likely **QA / SDETs** (Software Development Engineers in Test) own it. Modern teams treat quality as the **whole team's** job ("shift-left"), so the line is blurry.
+
+### Typical ownership by test type
+
+| Test type | What it checks | Usually written by | Where it runs |
+|---|---|---|---|
+| **Unit** | One function / class, with dependencies faked | **Developers** | Every commit / PR, seconds |
+| **Integration (code-level)** | Your code + a **real** dependency: DB, message queue, cache (often spun up with Testcontainers / docker) | **Developers** | Every PR |
+| **Contract** (e.g. Pact) | Service A and service B agree on the request/response shape | **Developers** of both services | Every PR |
+| **API functional** | The deployed API from outside: status codes, validation, auth, error handling, edge/negative cases, data combinations | **QA / SDET** mostly, devs often add the basic "happy path" ones | QA env, post-merge / nightly |
+| **API end-to-end / cross-service** | A business flow across several services via their APIs (create order → payment → stock → notification) | **QA / SDET** | QA / staging |
+| **UI E2E** | Full user journey through the browser | **QA / SDET** mostly | QA / staging |
+
+The difference between the two "integration" meanings:
+
+- **Developer integration test:** runs inside the code repo, starts the service + a real DB locally, and calls its classes or endpoints. It needs knowledge of the internals, and it fails before the code is ever deployed.
+- **QA API test:** a black-box test that sends HTTP requests to a **deployed** environment. It only needs the API spec (Swagger/OpenAPI), and it catches config, deployment and cross-service problems.
+
+### How different organisations do it
+
+| Model | Who writes what |
+|---|---|
+| **Separate QA team** (traditional) | Devs: unit tests. QA: API + UI test suites, often in a separate repo |
+| **QA/SDET embedded in each scrum team** (most common now) | Devs: unit + integration + contract. SDET: API functional + E2E, reviews devs' tests, builds the framework. Both count tests as part of the story's "definition of done" |
+| **No dedicated testers** (some big tech) | Developers write every level; a small group may own tools/frameworks |
+| **QA as coach / quality engineer** | Devs write most tests. QA designs the test strategy, finds gaps, does exploratory testing and owns the E2E framework |
+
+### For a Playwright tester
+
+API tests are a natural next step for a QA automation engineer, and Playwright supports them directly through the `request` fixture (`request.get / post / put / delete`). This project already sends `Authorization: Bearer <ACCESS_TOKEN>` via `extraHTTPHeaders`, so API tests against the petclinic backend could go in the same framework. They're also useful for **setting up and cleaning up test data** faster than doing it through the UI.
+
+---
+
+## How complex is this project, and is this level enough for a production test automation framework?
+
+**Date:** 2026-11-05
+**Project:** petclinic-pw-pom (Playwright POM)
+
+**Q:** What level of complexity is this project? If I learn this level of coding and test automation framework/architecture, is it good enough for a project in production?
+
+**A:** It's a **solid foundation, at roughly junior-to-mid QA automation level**. The **architecture** is the same one real production Playwright frameworks use, so what you're learning carries over directly. What it's missing is mostly the **scale and operations** side: many environments, many testers, hundreds of tests running in parallel. Production projects add that on top of this foundation.
+
+### What the project has now (~900 lines, 10 page objects, 19 tests)
+
+| Area | What's here | Production-grade? |
+|---|---|---|
+| **Page Object Model** | 10 page/component classes, one `PageManager`, one `pom` fixture, strict conventions (inline locators, no tiny methods, entry/exit checks, `expect*` methods for goal assertions) | **Yes.** This is the most important pattern, and the conventions are stricter than many real projects |
+| **Fixtures for setup/cleanup** | `restorePetTypes`, `restoreSpecialty`, `restoreVetSpecialties`, `restorePetTypeOfPets`: take a snapshot via the API, `use()`, then restore, even when a test fails | **Yes.** Cleaning up through the API in fixtures is the right approach |
+| **Auth** | Global setup logs in once, saves `storageState`, gets a bearer token for API calls | **Mostly.** Real projects usually use *setup projects* (one per user role) instead of `globalSetup` |
+| **Stable waiting** | Web-first assertions, `expect.poll`, no `waitForTimeout` | **Yes** |
+| **Test data** | JSON files in `test-data/` | Partly; see gaps |
+| **CI** | GitHub Actions on PR + `main`, container image, secrets, trace artifacts, concurrency lock | **Yes** for one environment |
+| **Process** | Feature branches, PRs, changelog, debugging with traces | **Yes**, and it's how real teams work |
+
+### What production frameworks usually add
+
+| Gap | Why production needs it | Concept to learn |
+|---|---|---|
+| **Parallel runs** | The suite runs with `workers: 1` because the tests share data on one live site. At 300+ tests that's too slow | Unique data per test (e.g. `faker`, already installed but not used yet), so tests don't collide; `fullyParallel`; `--shard` across CI machines |
+| **Multiple environments** | `baseURL` is hard-coded; real projects run against QA, staging, sometimes prod | `ENV=qa npx playwright test` choosing `.env.qa` / `.env.staging`, `baseURL` from env |
+| **Tags** | You need fast `@smoke` on PRs and full `@regression` nightly | `{ tag: '@smoke' }` + `--grep` |
+| **Multiple user roles** | Admin / normal user / read-only users | Auth setup projects + one `storageState` file per role |
+| **API layer** | API calls are written inline in fixtures; the four restore fixtures are almost copies of each other | API client / service classes (`PetTypesApi.getAll()`, `.update()`), one generic snapshot-restore helper, plus actual **API tests** |
+| **Retries + flaky test tracking** | Shared environments are noisy | `retries` in CI, watching the "flaky" section of the report |
+| **Reporting / notifications** | Managers and devs need to see results without opening CI | Allure or HTML report published, Slack/Teams message on failure |
+| **Code quality tooling** | Many people contribute | ESLint (with `eslint-plugin-playwright`), Prettier, TypeScript `strict`, no `any` (`auth-setup.ts` has two) |
+| **Wider coverage** | Real users use other browsers / devices | Firefox/WebKit/mobile projects, accessibility checks (`@axe-core/playwright`), visual tests (`toHaveScreenshot`) |
+
+### Verdict
+
+- **Yes, this level is a good base for production.** If you can explain *why* the POM conventions, fixture cleanup, auth state and CI setup are built this way, you understand what most production frameworks are made of.
+- **It isn't yet everything a senior engineer is expected to own.** The gap isn't harder coding; it's **designing for scale**: data isolation for parallel runs, multiple environments, API layers, and reporting.
+- **Suggested next steps, in order:**
+  1. Unique test data with `faker` + turn on parallel runs
+  2. Multi-environment config
+  3. `@smoke` / `@regression` tags in CI
+  4. API client classes + a few API tests
+  5. ESLint + TypeScript strict
+  6. Sharding + merged reports in CI
+
+---
