@@ -1202,3 +1202,113 @@ The one thing you lose is proof that the rename happened **in the same row**. Th
 This one is also position-based, but it doesn't use DOM ids, and the position is the point. It shows that **Add** puts the new pet type at the end of the list, which is what the user sees after saving. `dialog-boxes.spec.ts` uses it for that reason.
 
 ---
+
+## Should we add a GitHub Actions pipeline that runs the tests on every push?
+
+**Date:** 2026-11-05
+**Project:** petclinic-pw-pom (Playwright POM)
+
+**Q:** Should we create a GitHub Actions pipeline so the tests run every time we push code?
+
+**A:** Yes. It's worth doing, and the `pw-debug-actions` skill already assumes a CI run that uploads a `test-results` artifact. A few things about this repo affect how it should be set up.
+
+### What CI will actually catch here
+
+The tests run against the deployed site `https://petclinic.bondaracademy.com`, not an app built from this repo. So a run on push checks **the test code**: broken locators, POM mistakes, flaky waits. It also shows when the live app has changed underneath us. Since the app can change without a push from us, a nightly `schedule` run is worth adding as well.
+
+### Things to handle
+
+| Issue | Why it matters | Fix |
+|---|---|---|
+| Login credentials | `.env` is gitignored, so `EMAIL` / `PASSWORD` won't exist in CI and `auth-setup.ts` will fail | Add them as repository **secrets** and pass them as `env:` in the workflow. `ACCESS_TOKEN` is created by global setup, so it doesn't need a secret |
+| No traces on failure | `retries: 0` + `trace: 'on-first-retry'` means a CI failure leaves no trace to debug | Use `trace: 'retain-on-failure'`, or `retries: process.env.CI ? 1 : 0` |
+| Nothing to download | The runner is thrown away after the job | Upload `test-results/` and `playwright-report/` with `actions/upload-artifact`, using `if: always()` |
+| Shared live data | The specs rename and delete pet types, specialties, etc. Two runs at the same time (e.g. push + PR) can break each other | Add a `concurrency:` group so only one run happens at a time. `workers: 1` already keeps tests within a run in order |
+| Duplicate runs | `push` on every branch plus `pull_request` runs the suite twice for one change | Trigger on `pull_request` to `main` and `push` to `main`, plus `workflow_dispatch` for manual runs |
+| No npm script | `package.json` has an empty `scripts` | Add `"test": "playwright test"` so CI and local runs use the same command |
+
+### Workflow outline
+
+```yaml
+on:
+  push: { branches: [main] }
+  pull_request: { branches: [main] }
+  schedule: [{ cron: '0 2 * * *' }]
+  workflow_dispatch:
+concurrency: { group: petclinic-e2e, cancel-in-progress: false }
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: lts/*, cache: npm }
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test
+        env:
+          EMAIL: ${{ secrets.EMAIL }}
+          PASSWORD: ${{ secrets.PASSWORD }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: test-results, path: test-results/, retention-days: 7 }
+```
+
+Once it's green, a branch protection rule on `main` that requires this check stops a PR being merged with failing tests.
+
+---
+
+## Should we also dockerize the project?
+
+**Date:** 2026-11-05
+**Project:** petclinic-pw-pom (Playwright POM)
+
+**Q:** Along with a GitHub Actions pipeline, should we also dockerize the project?
+
+**A:** Not now. A Dockerfile would add work without solving a problem this repo has. If we want a fixed environment, run the CI job inside Playwright's official image instead.
+
+### What Docker usually solves, and whether it applies here
+
+| Usual reason | Applies here? |
+|---|---|
+| Packaging the app under test so tests can start it | No. The app is the remote site `petclinic.bondaracademy.com`; there's nothing of ours to containerize |
+| "Works on my machine": different OS, Node or browser versions | Mostly no. `package-lock.json` pins `@playwright/test`, which pins the browser builds. `npx playwright install --with-deps` gives CI the same browsers |
+| Screenshot tests that differ between Windows and Linux (fonts, anti-aliasing) | No. The suite has no `toHaveScreenshot` / `toMatchSnapshot`. This is the main reason Playwright projects use Docker, and it would become a real reason if we add visual tests |
+| Running on CI systems without Playwright support, or on self-hosted runners | No. GitHub's `ubuntu-latest` runner works fine |
+
+### What it would cost
+
+- Docker Desktop on Windows 11 Home needs WSL2, and running tests locally in a container is slower and harder to debug: no headed mode, and UI mode / trace viewer need extra setup.
+- Another file to keep in sync. The image tag has to match the `@playwright/test` version every time we upgrade.
+
+### The middle ground
+
+GitHub Actions can run the job inside Microsoft's prebuilt Playwright image, with no Dockerfile in the repo:
+
+```yaml
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.62.0-noble   # match @playwright/test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: lts/*, cache: npm }
+      - run: npm ci
+      - run: npx playwright test   # browsers are already in the image
+        env:
+          HOME: /root   # Firefox needs this in the container; harmless for Chromium
+          EMAIL: ${{ secrets.EMAIL }}
+          PASSWORD: ${{ secrets.PASSWORD }}
+```
+
+This skips the browser install step and fixes the OS-level environment. If we later add screenshot tests, the same image can be used locally to create the baseline screenshots, so local and CI images match exactly.
+
+### When to revisit
+
+- We add visual (screenshot) tests.
+- Teammates on macOS/Linux start getting different results.
+- We start running the petclinic app ourselves (e.g. a local backend + DB for isolated test data). Then `docker compose` for the app becomes very useful.
+
+---
