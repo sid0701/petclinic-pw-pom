@@ -8,6 +8,18 @@ Each entry lists the files changed, what changed, why, and how it was verified. 
 
 ## 2026-11-05
 
+### Added: global setup fails fast when `EMAIL` or `PASSWORD` is missing
+
+- **Files:** `.auth/auth-setup.ts`
+- **What changed:** before reading `user.json` or launching the browser, `browserAuthorize` checks that `EMAIL` and `PASSWORD` are set and not empty. If either is missing it throws `Missing required credentials: <names>. Set them in .env locally, or as repository secrets for GitHub Actions.`
+- **Why:**
+  - In CI the values come from repository secrets. An undefined secret becomes an empty string, and `process.env.EMAIL!` only satisfies TypeScript.
+  - Login then fails, and the run only shows a timeout from `waitForResponse('**/token')`, which doesn't point to the cause.
+  - A blank value counts as missing for the same reason.
+- **Verified:**
+  - `EMAIL= npx playwright test tests/checkboxes.spec.ts` stops in global setup with `Missing required credentials: EMAIL`, and with both blank it lists `EMAIL, PASSWORD`. No browser is launched and no tests run. A blank value is kept because dotenv doesn't overwrite a variable that's already set.
+  - With `.env` loaded normally, `tests/checkboxes.spec.ts` passes 3 of 3 against the live app.
+
 ### Added: GitHub Actions pipeline that runs the Playwright suite
 
 - **Files:** `.github/workflows/playwright.yml` (new), `playwright.config.ts`, `package.json`

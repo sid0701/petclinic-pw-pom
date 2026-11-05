@@ -1312,3 +1312,77 @@ This skips the browser install step and fixes the OS-level environment. If we la
 - We start running the petclinic app ourselves (e.g. a local backend + DB for isolated test data). Then `docker compose` for the app becomes very useful.
 
 ---
+
+## What's the difference between environment secrets and repository secrets, and which should hold our credentials?
+
+**Date:** 2026-11-05
+**Project:** petclinic-pw-pom (Playwright POM)
+
+**Q:** What's the difference between environment secrets and repository secrets in GitHub, and where should I add my `EMAIL` / `PASSWORD`?
+
+**A:** Use **repository secrets**. The workflow already reads `secrets.EMAIL` / `secrets.PASSWORD` without naming an environment, so repository secrets work with no changes.
+
+### The difference
+
+| | Repository secrets | Environment secrets |
+|---|---|---|
+| Where you add them | Settings → Secrets and variables → Actions → **Repository secrets** | Settings → **Environments** → *(create e.g. `staging`)* → Environment secrets |
+| Which jobs can read them | Every job in every workflow in the repo | Only jobs that declare `environment: <name>` |
+| Extra protection | None | Optional rules on the environment: only certain branches (e.g. `main`), required reviewers who must approve each run, a wait timer |
+| Same name in both | Overridden | Wins for jobs that use that environment |
+| Typical use | One set of credentials for the whole repo | Separate credentials per target (staging vs production), or credentials that need approval before use |
+
+Neither kind is passed to workflows triggered by a PR from a **fork**, and both are masked (`***`) in logs.
+
+### Why repository secrets fit this repo
+
+- There's one target (`petclinic.bondaracademy.com`) and one test account, so there's nothing to keep apart per environment.
+- Environment secrets would need `environment: <name>` added to the `test` job in `playwright.yml`. Without it, `secrets.EMAIL` silently comes back **empty** and global setup fails at login.
+- Branch restrictions or required reviewers would block or delay PR runs, which defeats running the tests on every PR.
+
+### When to switch to environments
+
+- The suite gets run against more than one deployment (e.g. `staging` and `prod`) with different accounts. Then make one environment each and choose with `environment: ${{ inputs.target }}`.
+- The credentials become sensitive enough that runs should only happen from `main` or need someone to approve them.
+
+### How to add them
+
+Either use the web UI (Settings → Secrets and variables → Actions → New repository secret, once for `EMAIL` and once for `PASSWORD`), or the CLI, which prompts for the value so it doesn't end up in shell history:
+
+```sh
+gh secret set EMAIL
+gh secret set PASSWORD
+```
+
+Use the same values as the local `.env`, without the surrounding quotes.
+
+---
+
+## Do we need code changes to read credentials from GitHub secrets instead of the `.env` file?
+
+**Date:** 2026-11-05
+**Project:** petclinic-pw-pom (Playwright POM)
+
+**Q:** When we add the secrets and CI uses them instead of the `.env` file, do we need to change any code?
+
+**A:** No. The code reads `process.env.EMAIL` / `process.env.PASSWORD` and doesn't care where they came from.
+
+### How the value reaches the code
+
+| | Locally | In GitHub Actions |
+|---|---|---|
+| Who sets `EMAIL` / `PASSWORD` | `require('dotenv').config()` in `playwright.config.ts` reads `.env` | The workflow's `env:` block copies `secrets.EMAIL` / `secrets.PASSWORD` into the process environment before `npm test` starts |
+| What `dotenv` does | Loads the two values | Finds no `.env` (it's gitignored), returns an `ENOENT` error object **without throwing**, and leaves the existing variables alone |
+| Who reads them | `.auth/auth-setup.ts` → `process.env.EMAIL!` / `process.env.PASSWORD!` | Same |
+
+Checked with dotenv 17 and no `.env` present: `config()` returned `error: ENOENT`, and an `EMAIL` set beforehand was unchanged. dotenv never overwrites a variable that's already set (unless `override: true`), so even if a `.env` existed, the CI values would win.
+
+`ACCESS_TOKEN` isn't a secret in either case. Global setup reads it from the `/token` response and puts it in `process.env`, and the worker processes inherit it.
+
+### Things to watch
+
+- **Quotes:** `.env` has `EMAIL='test@test.com'`. dotenv removes the quotes, but GitHub stores a secret exactly as typed, so leave them out.
+- **Missing secret = unclear failure:** an undefined secret becomes an empty string, the `!` in `process.env.EMAIL!` only satisfies TypeScript, login fails, and global setup then waits for `**/token` until it times out. The log shows a timeout, not "EMAIL is missing". Optionally, check for both variables at the top of `auth-setup.ts` and throw a clear error.
+- **Log line:** dotenv 17 prints `injected env (0) from .env` in CI. It's harmless; `config({ quiet: true })` hides it.
+
+---
