@@ -1,7 +1,7 @@
 {
-  "name": "playwright-homework",
+  "name": "petclinic-playwright-pom",
   "version": "1.0.0",
-  "description": "",
+  "description": "Playwright + TypeScript E2E framework for the PetClinic app, using a Page Object Model",
   "main": "index.js",
   "scripts": {
     "test": "playwright test"
