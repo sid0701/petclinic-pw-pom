@@ -6,12 +6,13 @@ export default defineConfig({
   fullyParallel: false,
   retries: 0,
   workers: 1,
-  reporter: 'html',
+  reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'html',
   globalSetup: '.auth/auth-setup.ts',
   timeout: 90000,
   use: {
     baseURL: 'https://petclinic.bondaracademy.com',
-    trace: 'on-first-retry',
+    // retries is 0, so 'on-first-retry' would never record a trace in CI
+    trace: process.env.CI ? 'retain-on-failure' : 'on-first-retry',
     storageState: '.auth/user.json',
     extraHTTPHeaders: {
       'Authorization': `Bearer ${process.env.ACCESS_TOKEN}`

@@ -6,6 +6,35 @@ Each entry lists the files changed, what changed, why, and how it was verified. 
 
 ---
 
+## 2026-11-05
+
+### Added: GitHub Actions pipeline that runs the Playwright suite
+
+- **Files:** `.github/workflows/playwright.yml` (new), `playwright.config.ts`, `package.json`
+- **What changed:**
+  - **Workflow `Playwright Tests`:**
+    - Runs on push to `main`, on pull requests to `main`, and manually (`workflow_dispatch`). There is no nightly schedule.
+    - Runs inside `mcr.microsoft.com/playwright:v1.64.1-noble`, which already has the browsers and their system packages. The tag matches `@playwright/test` 1.64.1 in `package-lock.json`.
+    - Steps: `npm ci`, then `npm test` with `EMAIL` / `PASSWORD` taken from repository secrets.
+    - Uploads `test-results/` (artifact `test-results`) and `playwright-report/` (artifact `playwright-report`) for 7 days, unless the run was cancelled.
+    - `concurrency: petclinic-e2e` with `cancel-in-progress: false`, plus a 30-minute job timeout.
+  - **`playwright.config.ts`:** when `CI` is set:
+    - `trace` is `retain-on-failure` instead of `on-first-retry`.
+    - The reporter is `list` + `html` (`open: 'never'`) instead of `html` alone.
+    - Local runs behave as before.
+  - **`package.json`:** added `"test": "playwright test"`.
+- **Why:**
+  - **Trace:** `retries` is 0, so `on-first-retry` never records a trace. A CI failure would leave nothing for the `pw-debug-actions` skill, which downloads the `test-results` artifact.
+  - **Reporter:** `list` prints each test's result in the job log, and `open: 'never'` stops the HTML reporter trying to open a browser.
+  - **Concurrency:** the specs rename and delete data on the shared live site. Two runs at the same time (e.g. a push to `main` and a PR) could break each other. Cancelling a run partway could skip a fixture's cleanup, so later runs wait instead.
+  - **Container image:** fixes the OS and browser environment and skips installing browsers on every run. A Dockerfile isn't needed (see `QA.md`).
+  - **Triggers:** running on every branch push plus PRs would test the same change twice.
+- **Verified:**
+  - `CI=1 npx playwright test --list` loads the config and lists 19 tests in 5 files.
+  - The workflow itself hasn't run yet. It needs the `EMAIL` and `PASSWORD` repository secrets and a PR to `main` (or a manual run once the file is on `main`).
+
+---
+
 ## 2026-11-04
 
 ### Changed: new-specialty test split in two, fixed the dropdown options check, added cleanup fixtures and removed races
