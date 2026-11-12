@@ -165,6 +165,21 @@ every push to `main`, and on demand from the Actions tab.
 
 ---
 
+## How this framework was built
+
+This framework was built with **Claude Code** as an AI coding assistant, with me setting the rules and
+reviewing the output:
+
+- **Rules first.** The architecture and scripting conventions (page object rules, locator and assertion style,
+  naming) are written down in [`.claude/rules/`](.claude/rules/), which Claude Code follows when it writes or
+  changes code.
+- **Every change through a pull request.** Each change was made on its own branch and reviewed by me before
+  merging. Since the CI pipeline was added, a pull request is merged only after it passes (type check, lint,
+  format check and the full suite).
+- Commits made with Claude Code carry a `Co-Authored-By` line, so the history shows which changes it helped with.
+
+---
+
 ## Roadmap
 
 Planned next steps toward a framework that scales to a larger suite and team:
